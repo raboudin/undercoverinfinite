@@ -1,0 +1,265 @@
+name: CI/CD
+
+# Équivalent des rules GitLab :
+#   - merge_request_event  -> pull_request
+#   - push sur main         -> push (branches: main)
+#   - tag vX.Y.Z            -> push (tags: v*)
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+
+env:
+  NODE_VERSION: "24"
+  HUSKY: "0"
+
+# Sur GitHub Actions, l'ordre des stages GitLab (build/test/scan/package)
+# se traduit par des dépendances "needs:" entre jobs plutôt que par des stages.
+
+jobs:
+  # ---------------------------------------------------------------------
+  # BUILD — uniquement sur les pull requests (= branches de feature GitLab)
+  # ---------------------------------------------------------------------
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules/
+          retention-days: 1
+
+  # ---------------------------------------------------------------------
+  # TESTS
+  # ---------------------------------------------------------------------
+  unit-tests:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules/
+      - run: npm run test:unit
+
+  # Base commune : service MongoDB (équivalent du template .with-mongo)
+  functional-tests:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_URI: mongodb://localhost:27017/moviejs-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - run: npm run test:functional
+
+  e2e-tests:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Couverture de code (tests unitaires + fonctionnels)
+  coverage:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_URI: mongodb://localhost:27017/moviejs-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - run: npm run test:coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/cobertura-coverage.xml
+      # Pour publier la couverture en commentaire de PR (équivalent du "coverage:"
+      # GitLab qui parse le pourcentage), on peut ajouter par exemple :
+      # - uses: irongut/CodeCoverageSummary@v1.3.0
+      #   with:
+      #     filename: coverage/cobertura-coverage.xml
+
+  # ---------------------------------------------------------------------
+  # SCAN — dépendances npm vulnérables, secrets, mauvaises configs (pas les images)
+  # --exit-code 1 fait échouer le job uniquement sur les failles CRITICAL
+  # avec un correctif disponible, pour limiter le bruit des CVE non-fixables.
+  # ---------------------------------------------------------------------
+  trivy-scan-repo:
+    needs: [unit-tests, functional-tests, e2e-tests]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan du dépôt (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+  # ---------------------------------------------------------------------
+  # PACKAGE — build & push des images Docker, uniquement sur main.
+  #
+  # Les tags vX.Y.Z ne rebuild PAS : comme un tag est toujours créé sur un
+  # commit déjà présent sur main, l'image existe déjà (taguée avec le SHA
+  # du commit). Le tag se contente de "retag" cette image existante
+  # (voir jobs retag-*-image) — ça évite un build Docker redondant.
+  #
+  # Registre utilisé ici : GitHub Container Registry (ghcr.io). Remplacer
+  # par un autre registre si besoin.
+  # ---------------------------------------------------------------------
+  build-push-app-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/app:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/app:latest
+
+  build-push-api-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/api:latest
+
+  # Sur un tag vX.Y.Z : récupère l'image déjà buildée pour ce commit (taguée
+  # avec le SHA) et la re-tague/pousse sous le tag de version, sans repasser
+  # par "docker build".
+  retag-app-image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker pull ghcr.io/${{ github.repository }}/app:${{ github.sha }}
+          docker tag ghcr.io/${{ github.repository }}/app:${{ github.sha }} ghcr.io/${{ github.repository }}/app:${{ github.ref_name }}
+          docker push ghcr.io/${{ github.repository }}/app:${{ github.ref_name }}
+
+  retag-api-image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker pull ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+          docker tag ghcr.io/${{ github.repository }}/api:${{ github.sha }} ghcr.io/${{ github.repository }}/api:${{ github.ref_name }}
+          docker push ghcr.io/${{ github.repository }}/api:${{ github.ref_name }}
+
+  # ---------------------------------------------------------------------
+  # DEPLOY — appelle le workflow réutilisable deploy.yml
+  # (équivalent du template GitLab .deploy-vps)
+  # ---------------------------------------------------------------------
+
+  # À chaque push sur main : déploie le dernier commit de main sur staging
+  deploy-staging:
+    needs: [build-push-app-image, build-push-api-image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      compose_file: docker-compose.staging.yml
+      deploy_subpath: staging
+      image_tag: ${{ github.sha }}
+    secrets: inherit
+
+  # À chaque tag vX.Y.Z : déploie cette version précise sur production
+  deploy-production:
+    needs: [retag-app-image, retag-api-image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      compose_file: docker-compose.prod.yml
+      deploy_subpath: production
+      image_tag: ${{ github.ref_name }}
+    secrets: inherit

@@ -1,0 +1,62 @@
+name: Rollback production
+
+# Rollback manuel de la prod : redéploie une image de version déjà présente
+# dans le registre (aucun rebuild). Le tag (ex. vX.Y.Z d'une version
+# précédente) doit être renseigné à la main au lancement (Actions >
+# Rollback production > Run workflow).
+#
+# Équivalent du job GitLab "rollback-production" (when: manual, needs: []).
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag de version vers lequel revenir (ex. v1.2.3)"
+        required: true
+        type: string
+
+jobs:
+  rollback-production:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Vérifier le format du tag
+        run: |
+          if [[ ! "${{ inputs.image_tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "IMAGE_TAG invalide : attendu au format vX.Y.Z"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Préparer la connexion SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY_B64 }}" | base64 -d > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Redéployer la version précédente
+        env:
+          DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}/production
+          COMPOSE_FILE: docker-compose.prod.yml
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "mkdir -p $DEPLOY_PATH"
+          scp -i ~/.ssh/id_deploy "$COMPOSE_FILE" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/$COMPOSE_FILE"
+
+          cat > .env.deploy <<EOF
+          CI_REGISTRY_IMAGE=ghcr.io/${{ github.repository }}
+          IMAGE_TAG=$IMAGE_TAG
+          MONGODB_URI=${{ secrets.MONGODB_URI }}
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          EOF
+          scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
+
+          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin && \
+             cd $DEPLOY_PATH && \
+             docker compose -f $COMPOSE_FILE pull && \
+             docker compose -f $COMPOSE_FILE up -d; \
+             status=\$?; \
+             docker logout ghcr.io; \
+             exit \$status"
