@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@theme {
+  /* fonts */
+  --font-display: 'Oswald', 'Arial Narrow', sans-serif;
+  --font-body: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Courier Prime', 'Courier New', monospace;
+
+  /* raw palette */
+  --color-ink-0: #05070a;
+  --color-ink-1: #0a0e15;
+  --color-ink-2: #10141d;
+  --color-ink-3: #161c28;
+  --color-ink-4: #1f2735;
+  --color-ink-5: #2c3547;
+  --color-steel-1: #3a4358;
+  --color-steel-2: #5b6478;
+  --color-fog-1: #8a92a3;
+  --color-fog-2: #b7bdc9;
+  --color-paper-0: #f5f6f8;
+  --color-paper-1: #e8eaed;
+  --color-red-9: #3d0a10;
+  --color-red-7: #7a1420;
+  --color-red-5: #c41e3a;
+  --color-red-4: #d62839;
+  --color-red-3: #e6495b;
+  --color-blue-8: #0e1f33;
+  --color-blue-6: #1c3a5e;
+  --color-blue-5: #2f5787;
+  --color-blue-4: #4a6fa5;
+  --color-blue-3: #7fa0c9;
+  --color-olive-6: #3a3d28;
+  --color-olive-5: #565a37;
+  --color-olive-4: #767c46;
+  --color-amber-5: #c98a2e;
+  --color-amber-4: #e0a53f;
+
+  /* semantic aliases -> bg-app, text-primary, border-subtle, etc. */
+  --color-app: var(--color-ink-1);
+  --color-surface: var(--color-ink-2);
+  --color-surface-raised: var(--color-ink-3);
+  --color-surface-inset: var(--color-ink-0);
+  --color-subtle: var(--color-ink-4);
+  --color-default: var(--color-steel-1);
+  --color-strong: var(--color-steel-2);
+  --color-primary: var(--color-paper-1);
+  --color-secondary: var(--color-fog-2);
+  --color-tertiary: var(--color-fog-1);
+  --color-on-accent: var(--color-paper-0);
+  --color-accent-primary: var(--color-red-5);
+  --color-accent-primary-hover: var(--color-red-4);
+  --color-accent-primary-press: var(--color-red-7);
+  --color-accent-secondary: var(--color-blue-4);
+  --color-accent-secondary-hover: var(--color-blue-5);
+  --color-accent-tertiary: var(--color-olive-5);
+  --color-success: #4a8a5c;
+  --color-warning: var(--color-amber-5);
+  --color-danger: var(--color-red-5);
+  --color-info: var(--color-blue-4);
+  --color-focus-ring: var(--color-blue-3);
+
+  /* type scale */
+  --text-display-xl: clamp(40px, 6vw, 72px);
+  --text-display-l: clamp(30px, 4vw, 48px);
+  --text-display-m: 28px;
+  --text-display-s: 22px;
+  --text-title: 18px;
+  --text-body: 15px;
+  --text-body-s: 13px;
+  --text-caption: 11px;
+  --tracking-caps: 0.14em;
+
+  /* radii (named sm/md/lg, not bare s/m/l — Tailwind reserves bare s/l as
+     logical direction suffixes on rounded-*, e.g. rounded-s = inline-start) */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* shadows / glows */
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, .4), 0 8px 24px -8px rgba(0, 0, 0, .6);
+  --shadow-raised: 0 2px 0 rgba(0, 0, 0, .5), 0 16px 40px -12px rgba(0, 0, 0, .7);
+  --shadow-modal: 0 24px 64px -12px rgba(0, 0, 0, .8);
+  --shadow-glow-danger: 0 0 0 1px var(--color-red-5), 0 0 24px -4px rgba(196, 30, 58, .55);
+  --shadow-glow-recon: 0 0 0 1px var(--color-blue-4), 0 0 24px -4px rgba(74, 111, 165, .45);
+}
+
+body {
+  background: var(--color-app);
+  color: var(--color-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.5;
+}
+
+.dossier-texture {
+  background-image: radial-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px);
+  background-size: 3px 3px;
+}

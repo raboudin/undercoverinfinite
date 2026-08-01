@@ -1,0 +1,71 @@
+name: Deploy (réutilisable)
+
+# Équivalent du template GitLab .deploy-vps : copie le compose ciblé + un .env
+# généré (tag d'image + MONGODB_URI + TMDB_API_KEY) par SSH, puis pull &
+# (re)démarre les conteneurs. "db" tourne déjà sur le VPS, rattachée au
+# réseau Traefik "proxy". Chaque environnement vit dans son propre
+# sous-dossier de VPS_DEPLOY_PATH pour ne pas écraser l'autre.
+#
+# Secrets/variables GitHub requis (Settings > Secrets and variables > Actions) :
+#   VPS_SSH_PRIVATE_KEY_B64 --> clé privée autorisée sur le VPS, encodée en base64
+#   VPS_HOST                --> IP ou domaine du VPS
+#   VPS_USER                --> utilisateur SSH sur le VPS
+#   VPS_DEPLOY_PATH          --> dossier racine sur le VPS (staging/ et production/ dedans)
+#   MONGODB_URI              --> URI Mongo du conteneur déjà présent sur le VPS
+#   TMDB_API_KEY             --> transmise telle quelle au conteneur api
+#   (le registre utilisé ici est ghcr.io, connecté avec GITHUB_TOKEN)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      compose_file:
+        required: true
+        type: string
+      deploy_subpath:
+        required: true
+        type: string
+      image_tag:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Préparer la connexion SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY_B64 }}" | base64 -d > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Copier le compose et déployer
+        env:
+          DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}/${{ inputs.deploy_subpath }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "mkdir -p $DEPLOY_PATH"
+          scp -i ~/.ssh/id_deploy "${{ inputs.compose_file }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/${{ inputs.compose_file }}"
+
+          cat > .env.deploy <<EOF
+          CI_REGISTRY_IMAGE=ghcr.io/${{ github.repository }}
+          IMAGE_TAG=$IMAGE_TAG
+          MONGODB_URI=${{ secrets.MONGODB_URI }}
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          EOF
+          scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
+
+          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin && \
+             cd $DEPLOY_PATH && \
+             docker compose -f ${{ inputs.compose_file }} pull && \
+             docker compose -f ${{ inputs.compose_file }} up -d; \
+             status=\$?; \
+             docker logout ghcr.io; \
+             exit \$status"
