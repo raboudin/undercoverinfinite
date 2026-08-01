@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: undercoverinfinite
+      POSTGRES_PASSWORD: undercoverinfinite
+      POSTGRES_DB: undercoverinfinite
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18's image stores data in a version-specific subdirectory
+      # under /var/lib/postgresql (pg_ctlcluster-style layout) — mount the
+      # parent dir, not /var/lib/postgresql/data as with older images.
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U undercoverinfinite -d undercoverinfinite"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
