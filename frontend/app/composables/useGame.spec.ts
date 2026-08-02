@@ -15,9 +15,13 @@ function seeded(seed: number) {
 
 const SIX = ['Marion', 'Karim', 'Sami', 'Léa', 'Youssef', 'Nadia']
 
+// Les paires viennent désormais de l'appelant (crédit quotidien de l'API) :
+// les tests en injectent une fixe.
+const PAIR = { a: 'Café', b: 'Thé' }
+
 function newGame(names: string[] = SIX, undercoverCount = 1, seed = 42): Game {
   const game = createGame({ rng: seeded(seed) })
-  game.configure({ names, undercoverCount })
+  game.configure({ names, undercoverCount }, PAIR)
   return game
 }
 
@@ -66,7 +70,7 @@ describe('createGame — configuration', () => {
 
   it('passe en phase reveal et efface l’erreur quand la config est valide', () => {
     const game = createGame({ rng: seeded(1) })
-    expect(game.configure({ names: SIX, undercoverCount: 2 })).toBe(true)
+    expect(game.configure({ names: SIX, undercoverCount: 2 }, PAIR)).toBe(true)
     expect(game.phase.value).toBe('reveal')
     expect(game.error.value).toBeNull()
     expect(game.round.value).toBe(0)
@@ -74,34 +78,34 @@ describe('createGame — configuration', () => {
 
   it('refuse moins de 3 agents ou plus que le maximum', () => {
     const game = createGame()
-    expect(game.configure({ names: ['Marion', 'Karim'], undercoverCount: 1 })).toBe(false)
+    expect(game.configure({ names: ['Marion', 'Karim'], undercoverCount: 1 }, PAIR)).toBe(false)
     expect(game.phase.value).toBe('setup')
     expect(game.error.value).toContain('entre 3 et 12')
 
     const tooMany = Array.from({ length: MAX_PLAYERS + 1 }, (_, i) => `Agent ${i}`)
-    expect(game.configure({ names: tooMany, undercoverCount: 1 })).toBe(false)
+    expect(game.configure({ names: tooMany, undercoverCount: 1 }, PAIR)).toBe(false)
     expect(game.phase.value).toBe('setup')
   })
 
   it('refuse un nom de code vide, espaces compris', () => {
     const game = createGame()
-    expect(game.configure({ names: ['Marion', '   ', 'Sami'], undercoverCount: 1 })).toBe(false)
+    expect(game.configure({ names: ['Marion', '   ', 'Sami'], undercoverCount: 1 }, PAIR)).toBe(false)
     expect(game.error.value).toContain('nom de code')
   })
 
   it('refuse les doublons sans tenir compte de la casse', () => {
     const game = createGame()
-    expect(game.configure({ names: ['Marion', 'marion', 'Sami'], undercoverCount: 1 })).toBe(false)
+    expect(game.configure({ names: ['Marion', 'marion', 'Sami'], undercoverCount: 1 }, PAIR)).toBe(false)
     expect(game.error.value).toContain('même nom de code')
   })
 
   it('refuse un nombre d’undercovers hors bornes', () => {
     const game = createGame()
-    expect(game.configure({ names: SIX, undercoverCount: 0 })).toBe(false)
+    expect(game.configure({ names: SIX, undercoverCount: 0 }, PAIR)).toBe(false)
     expect(game.error.value).toContain('entre 1 et 2')
 
     // 6 agents plafonnent à 2 undercovers : à 3 les civils ne seraient plus majoritaires.
-    expect(game.configure({ names: SIX, undercoverCount: 3 })).toBe(false)
+    expect(game.configure({ names: SIX, undercoverCount: 3 }, PAIR)).toBe(false)
     expect(game.phase.value).toBe('setup')
   })
 
@@ -130,6 +134,20 @@ describe('createGame — distribution des rôles', () => {
     expect(civilWords.size).toBe(1)
     expect(undercoverWords.size).toBe(1)
     expect([...civilWords][0]).not.toBe([...undercoverWords][0])
+  })
+
+  it('distribue les deux mots de la paire fournie', () => {
+    const game = newGame(SIX, 2)
+    const words = new Set(game.players.value.map(player => player.word))
+    expect(words).toEqual(new Set([PAIR.a, PAIR.b]))
+  })
+
+  it('n’attribue pas toujours le même côté de la paire aux civils', () => {
+    const civilSides = [1, 2, 3, 4, 5, 6, 7, 8].map(
+      seed =>
+        newGame(SIX, 1, seed).players.value.find(player => player.role === 'civil')!.word
+    )
+    expect(new Set(civilSides).size).toBe(2)
   })
 
   it('ne place pas les undercovers toujours aux mêmes sièges', () => {
@@ -291,10 +309,15 @@ describe('createGame — fin de partie', () => {
     playRoundAndEliminate(game, 'undercover')
     expect(game.phase.value).toBe('victory')
 
-    game.replaySameTeam()
+    const nextPair = { a: 'Avion', b: 'Hélicoptère' }
+    game.replaySameTeam(nextPair)
 
     expect(game.phase.value).toBe('reveal')
     expect(game.players.value.map(player => player.name)).toEqual(['Marion', 'Karim', 'Sami'])
+    // Nouvelle partie = nouvelle paire : les anciens mots ne doivent pas resservir.
+    expect(new Set(game.players.value.map(player => player.word))).toEqual(
+      new Set([nextPair.a, nextPair.b])
+    )
     expect(game.players.value.every(player => player.alive)).toBe(true)
     expect(game.players.value.filter(player => player.role === 'undercover')).toHaveLength(1)
     expect(game.winner.value).toBeNull()

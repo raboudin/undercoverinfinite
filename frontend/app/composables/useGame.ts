@@ -1,5 +1,14 @@
 import { computed, ref } from 'vue'
-import { wordPairs } from '../data/word-pairs'
+
+/**
+ * Deux mots proches mais distincts : les civils reçoivent l'un, les
+ * undercovers l'autre. Les paires viennent de l'API (lot quotidien généré
+ * par LLM) — il n'y a plus de liste locale.
+ */
+export interface WordPair {
+  a: string
+  b: string
+}
 
 export type Role = 'civil' | 'undercover'
 export type Phase = 'setup' | 'reveal' | 'describe' | 'vote' | 'elimination' | 'victory'
@@ -41,8 +50,7 @@ function shuffle<T>(items: readonly T[], rng: () => number): T[] {
   return out
 }
 
-function deal(names: string[], undercoverCount: number, rng: () => number): Player[] {
-  const pair = wordPairs[Math.floor(rng() * wordPairs.length)]!
+function deal(names: string[], undercoverCount: number, pair: WordPair, rng: () => number): Player[] {
   // Le côté de la paire attribué aux civils est tiré au sort, sinon les
   // undercovers hériteraient toujours du même mot de la liste.
   const civilsTakeA = rng() < 0.5
@@ -134,7 +142,12 @@ export function createGame(options: { rng?: () => number } = {}) {
     phase.value = 'describe'
   }
 
-  function configure(config: GameConfig): boolean {
+  /**
+   * La paire du jour est fournie par l'appelant (crédit quotidien) : elle
+   * n'est consommée que si la configuration est valide — un `false` ne doit
+   * pas brûler de crédit.
+   */
+  function configure(config: GameConfig, pair: WordPair): boolean {
     const trimmed = config.names.map(name => name.trim())
     const problem = validate(trimmed, config.undercoverCount)
     error.value = problem
@@ -142,7 +155,7 @@ export function createGame(options: { rng?: () => number } = {}) {
 
     names.value = trimmed
     undercoverCount.value = config.undercoverCount
-    players.value = deal(trimmed, config.undercoverCount, rng)
+    players.value = deal(trimmed, config.undercoverCount, pair, rng)
     revealIndex.value = 0
     speakerIndex.value = 0
     round.value = 0
@@ -197,8 +210,10 @@ export function createGame(options: { rng?: () => number } = {}) {
     startRound(round.value + 1)
   }
 
-  function replaySameTeam() {
-    players.value = deal(names.value, undercoverCount.value, rng)
+  // Rejouer est une nouvelle partie : elle consomme un crédit, donc une
+  // nouvelle paire — sinon l'équipe rejouerait avec des mots déjà connus.
+  function replaySameTeam(pair: WordPair) {
+    players.value = deal(names.value, undercoverCount.value, pair, rng)
     revealIndex.value = 0
     speakerIndex.value = 0
     round.value = 0
