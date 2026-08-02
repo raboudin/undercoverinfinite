@@ -51,6 +51,8 @@ jobs:
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB=${{ secrets.POSTGRES_DB }}
           LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+          LLM_MODEL=${{ vars.LLM_MODEL }}
+          LLM_GATEWAY_URL=${{ vars.LLM_GATEWAY_URL }}
           EOF
           scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
 

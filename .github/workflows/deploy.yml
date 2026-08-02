@@ -11,8 +11,15 @@ name: Deploy (réutilisable)
 #   VPS_HOST                --> IP ou domaine du VPS
 #   VPS_USER                --> utilisateur SSH sur le VPS
 #   VPS_DEPLOY_PATH          --> dossier racine sur le VPS (staging/ et production/ dedans)
-#   DATABASE_URL             --> URI Postgres du conteneur déjà présent sur le VPS
+#   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB --> identifiants de la base
+#   LLM_API_KEY              --> clé du gateway LLM (génération des mots du jour)
 #   (le registre utilisé ici est ghcr.io, connecté avec GITHUB_TOKEN)
+#
+# Variables GitHub optionnelles (Settings > Secrets and variables > Actions >
+# Variables) — non sensibles, laissées vides elles retombent sur les défauts
+# déclarés dans les compose :
+#   LLM_MODEL                --> modèle routé par le gateway
+#   LLM_GATEWAY_URL          --> endpoint OpenAI-compatible du gateway
 
 on:
   workflow_call:
@@ -59,6 +66,8 @@ jobs:
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB=${{ secrets.POSTGRES_DB }}
           LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+          LLM_MODEL=${{ vars.LLM_MODEL }}
+          LLM_GATEWAY_URL=${{ vars.LLM_GATEWAY_URL }}
           EOF
           scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
 
