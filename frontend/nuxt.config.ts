@@ -5,6 +5,13 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
+  runtimeConfig: {
+    public: {
+      // URL de l'API NestJS (mots du jour). Surchargée en déploiement via
+      // NUXT_PUBLIC_API_BASE ; en dev l'API écoute sur :3001 (cf. api/.env.example).
+      apiBase: 'http://localhost:3001'
+    }
+  },
   app: {
     head: {
       title: 'Undercover Infinite',

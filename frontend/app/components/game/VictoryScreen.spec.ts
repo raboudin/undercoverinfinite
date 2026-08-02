@@ -61,4 +61,14 @@ describe('VictoryScreen', () => {
     await buttons[1]!.trigger('click')
     expect(wrapper.emitted('newGame')).toHaveLength(1)
   })
+
+  it('désactive le replay quand le quota de mots du jour est épuisé', () => {
+    const wrapper = mount(VictoryScreen, {
+      props: { winner: 'civils' as const, players, canReplay: false },
+      global
+    })
+    const replayButton = wrapper.findAllComponents(Button)[0]!
+    expect(replayButton.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('reviens demain')
+  })
 })

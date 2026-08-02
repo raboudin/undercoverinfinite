@@ -12,3 +12,17 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// Lot quotidien de paires de mots générées par LLM : `day` est la date (Europe/Paris)
+// du lot, `position` l'index 0..4 de la paire dans le lot. Le côté de la paire
+// attribué aux civils reste tiré au sort côté client, comme avant.
+model DailyWordPair {
+  id        String   @id @default(cuid())
+  day       DateTime @db.Date
+  position  Int
+  wordA     String
+  wordB     String
+  createdAt DateTime @default(now())
+
+  @@unique([day, position])
+}
