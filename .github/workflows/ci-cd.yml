@@ -97,43 +97,47 @@ jobs:
   #         path: playwright-report/
   #         retention-days: 7
 
-  # Couverture de code (tests unitaires + fonctionnels)
-  coverage:
-    needs: build
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: undercoverinfinite
-          POSTGRES_PASSWORD: undercoverinfinite
-          POSTGRES_DB: undercoverinfinite_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - run: npm ci
-      - run: npm run test:coverage
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage/cobertura-coverage.xml
-      # Pour publier la couverture en commentaire de PR (équivalent du "coverage:"
-      # GitLab qui parse le pourcentage), on peut ajouter par exemple :
-      # - uses: irongut/CodeCoverageSummary@v1.3.0
-      #   with:
-      #     filename: coverage/cobertura-coverage.xml
+  # coverage : désactivé pour l'instant, même souci que e2e-tests — tourne
+  # à la racine (pas de package.json) et appelle `npm run test:coverage`,
+  # qui n'existe dans aucun des deux package.json (frontend/api). À
+  # réactiver en matrice frontend/api (vitest --coverage / jest --coverage)
+  # une fois les scripts npm correspondants ajoutés.
+  # coverage:
+  #   needs: build
+  #   if: github.event_name == 'pull_request'
+  #   runs-on: ubuntu-latest
+  #   services:
+  #     postgres:
+  #       image: postgres:18-alpine
+  #       env:
+  #         POSTGRES_USER: undercoverinfinite
+  #         POSTGRES_PASSWORD: undercoverinfinite
+  #         POSTGRES_DB: undercoverinfinite_test
+  #       ports:
+  #         - 5432:5432
+  #       options: >-
+  #         --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
+  #         --health-interval 5s
+  #         --health-timeout 5s
+  #         --health-retries 10
+  #   env:
+  #     DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: actions/setup-node@v7
+  #       with:
+  #         node-version: ${{ env.NODE_VERSION }}
+  #     - run: npm ci
+  #     - run: npm run test:coverage
+  #     - uses: actions/upload-artifact@v7
+  #       with:
+  #         name: coverage-report
+  #         path: coverage/cobertura-coverage.xml
+  #     # Pour publier la couverture en commentaire de PR (équivalent du "coverage:"
+  #     # GitLab qui parse le pourcentage), on peut ajouter par exemple :
+  #     # - uses: irongut/CodeCoverageSummary@v1.3.0
+  #     #   with:
+  #     #     filename: coverage/cobertura-coverage.xml
 
   # ---------------------------------------------------------------------
   # SCAN — dépendances npm vulnérables, secrets, mauvaises configs (pas les images)
