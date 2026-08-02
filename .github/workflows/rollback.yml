@@ -1,5 +1,11 @@
 name: Rollback production
 
+# ⚠️ DORMANT — hérité d'un autre projet (moviejs), pas encore adapté à
+# Undercover Infinite. Déclenchable manuellement mais il échouera : il
+# référence MongoDB et TMDB_API_KEY (le projet tourne sur Postgres/Prisma),
+# des secrets VPS non configurés et des images Docker jamais publiées.
+# Ne pas lancer tant que le déploiement n'est pas réellement mis en place.
+
 # Rollback manuel de la prod : redéploie une image de version déjà présente
 # dans le registre (aucun rebuild). Le tag (ex. vX.Y.Z d'une version
 # précédente) doit être renseigné à la main au lancement (Actions >

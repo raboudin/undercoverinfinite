@@ -40,6 +40,20 @@ npm run prisma:migrate       # create/apply a dev migration
 npm run prisma:studio        # open Prisma Studio
 ```
 
+**Don't strip `--experimental-vm-modules` from the jest scripts.** Prisma 7's generated client loads its query compiler as WASM through a dynamic `import()`. Jest's default CJS VM refuses that with `TypeError: A dynamic import callback was invoked without --experimental-vm-modules`, so any suite that boots a module touching `PrismaService` fails. The flag is why the scripts invoke `node ./node_modules/jest/bin/jest.js` instead of plain `jest`.
+
+Two related bits of jest config exist for the same reason and shouldn't be removed:
+- `moduleNameMapper: {"^(\\.{1,2}/.*)\\.js$": "$1"}` — source imports the generated client as `'../generated/prisma/client.js'` (required by `nodenext`) while the file on disk is `.ts`; jest doesn't know that convention and reports "Cannot find module".
+- `setupFiles: ["dotenv/config"]` — e2e boots `AppModule`, so `PrismaService` needs `DATABASE_URL`; in production `main.ts` loads it, but tests never go through `main.ts`.
+
+ESLint ignores `src/generated/**` (`eslint.config.mjs`) — the Prisma client is generated code, regenerated on every `npm install`.
+
+### CI
+
+`.github/workflows/ci-cd.yml` runs on every PR and every push to `main`: a `frontend` job (Vitest + `nuxt build`), an `api` job (ESLint, jest unit, jest e2e against a real Postgres service container, `nest build`), then a Trivy filesystem scan. Each job does its own `npm ci` in its subdirectory — there is no root `package.json`.
+
+`deploy.yml` and `rollback.yml` are **dormant**: they're leftovers from another project (MongoDB, `TMDB_API_KEY`, VPS secrets, Docker images that are never built here). Nothing calls `deploy.yml`, and `rollback.yml` would fail if triggered manually. Rewrite them when real hosting exists — don't wire them up as-is.
+
 ### Dev database
 
 ```bash
