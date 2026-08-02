@@ -1,7 +1,7 @@
 name: Deploy (réutilisable)
 
 # Équivalent du template GitLab .deploy-vps : copie le compose ciblé + un .env
-# généré (tag d'image + MONGODB_URI + TMDB_API_KEY) par SSH, puis pull &
+# généré (tag d'image + DATABASE_URL) par SSH, puis pull &
 # (re)démarre les conteneurs. "db" tourne déjà sur le VPS, rattachée au
 # réseau Traefik "proxy". Chaque environnement vit dans son propre
 # sous-dossier de VPS_DEPLOY_PATH pour ne pas écraser l'autre.
@@ -11,8 +11,7 @@ name: Deploy (réutilisable)
 #   VPS_HOST                --> IP ou domaine du VPS
 #   VPS_USER                --> utilisateur SSH sur le VPS
 #   VPS_DEPLOY_PATH          --> dossier racine sur le VPS (staging/ et production/ dedans)
-#   MONGODB_URI              --> URI Mongo du conteneur déjà présent sur le VPS
-#   TMDB_API_KEY             --> transmise telle quelle au conteneur api
+#   DATABASE_URL             --> URI Postgres du conteneur déjà présent sur le VPS
 #   (le registre utilisé ici est ghcr.io, connecté avec GITHUB_TOKEN)
 
 on:
@@ -56,8 +55,7 @@ jobs:
           cat > .env.deploy <<EOF
           CI_REGISTRY_IMAGE=ghcr.io/${{ github.repository }}
           IMAGE_TAG=$IMAGE_TAG
-          MONGODB_URI=${{ secrets.MONGODB_URI }}
-          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
           EOF
           scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
 
