@@ -3,10 +3,14 @@ import { computed } from 'vue'
 import type { Player, Winner } from '../../composables/useGame'
 import logoFull from '../../assets/images/logo-full.png'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   winner: Exclude<Winner, null>
   players: Player[]
-}>()
+  /** Rejouer consomme un crédit de mots : à false quand le quota du jour est épuisé. */
+  canReplay?: boolean
+}>(), {
+  canReplay: true
+})
 
 defineEmits<{ replay: []; newGame: [] }>()
 
@@ -64,7 +68,12 @@ const undercoverLabel = computed(() => {
     </div>
 
     <div class="flex flex-col gap-2.5">
-      <Button size="l" class="w-full" @click="$emit('replay')">Rejouer avec la même équipe</Button>
+      <Button size="l" class="w-full" :disabled="!canReplay" @click="$emit('replay')">
+        Rejouer avec la même équipe
+      </Button>
+      <p v-if="!canReplay" class="text-center font-mono text-caption text-tertiary">
+        Plus de mots aujourd'hui — reviens demain pour relancer une mission.
+      </p>
       <Button size="l" variant="ghost" class="w-full" @click="$emit('newGame')">Nouvelle mission</Button>
     </div>
   </div>
