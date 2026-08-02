@@ -1,12 +1,5 @@
 name: Deploy (réutilisable)
 
-# ⚠️ DORMANT — hérité d'un autre projet (moviejs), pas encore adapté à
-# Undercover Infinite. Plus aucun workflow ne l'appelle : ci-cd.yml s'arrête à
-# la CI. Il reste ici comme modèle pour le jour où un hébergement existera.
-# À adapter avant toute utilisation : ce fichier référence MongoDB et
-# TMDB_API_KEY (le projet tourne sur Postgres/Prisma), et suppose des images
-# Docker et des compose files staging/prod qui n'existent pas dans le dépôt.
-
 # Équivalent du template GitLab .deploy-vps : copie le compose ciblé + un .env
 # généré (tag d'image + DATABASE_URL) par SSH, puis pull &
 # (re)démarre les conteneurs. "db" tourne déjà sur le VPS, rattachée au
