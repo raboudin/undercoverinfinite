@@ -47,8 +47,7 @@ jobs:
           cat > .env.deploy <<EOF
           CI_REGISTRY_IMAGE=ghcr.io/${{ github.repository }}
           IMAGE_TAG=$IMAGE_TAG
-          MONGODB_URI=${{ secrets.MONGODB_URI }}
-          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
           EOF
           scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
 

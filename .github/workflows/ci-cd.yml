@@ -56,18 +56,27 @@ jobs:
           path: node_modules/
       - run: npm run test:unit
 
-  # Base commune : service MongoDB (équivalent du template .with-mongo)
+  # Base commune : service PostgreSQL (équivalent du template .with-postgres)
   functional-tests:
     needs: build
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     services:
-      mongo:
-        image: mongo:7
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: undercoverinfinite
+          POSTGRES_PASSWORD: undercoverinfinite
+          POSTGRES_DB: undercoverinfinite_test
         ports:
-          - 27017:27017
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      MONGODB_URI: mongodb://localhost:27017/moviejs-test
+      DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -100,12 +109,21 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     services:
-      mongo:
-        image: mongo:7
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: undercoverinfinite
+          POSTGRES_PASSWORD: undercoverinfinite
+          POSTGRES_DB: undercoverinfinite_test
         ports:
-          - 27017:27017
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      MONGODB_URI: mongodb://localhost:27017/moviejs-test
+      DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
