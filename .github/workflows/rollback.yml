@@ -26,7 +26,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Préparer la connexion SSH
         run: |
@@ -47,7 +47,9 @@ jobs:
           cat > .env.deploy <<EOF
           CI_REGISTRY_IMAGE=ghcr.io/${{ github.repository }}
           IMAGE_TAG=$IMAGE_TAG
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
           EOF
           scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
 

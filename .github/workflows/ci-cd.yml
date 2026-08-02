@@ -22,124 +22,122 @@ env:
 jobs:
   # ---------------------------------------------------------------------
   # BUILD — uniquement sur les pull requests (= branches de feature GitLab)
+  #
+  # frontend/ et api/ sont deux projets Node indépendants (pas de
+  # package.json à la racine du repo) : chaque step tourne dans son propre
+  # dossier via une matrice, plutôt qu'un seul `npm ci`/`npm run build` à
+  # la racine qui n'a jamais eu de package.json à consommer.
+  #
+  # Pas d'artifact node_modules entre build et unit-tests : le zip
+  # d'actions/upload-artifact casse les symlinks de node_modules/.bin/
+  # (vitest, jest introuvables au download). Chaque job refait son
+  # `npm ci`, avec le cache npm natif de setup-node pour rester rapide.
   # ---------------------------------------------------------------------
   build:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend, api]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm ci
-      - uses: actions/upload-artifact@v4
-        with:
-          name: node_modules
-          path: node_modules/
-          retention-days: 1
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - working-directory: ${{ matrix.app }}
+        run: npm ci
+      - working-directory: ${{ matrix.app }}
+        run: npm run build
 
   # ---------------------------------------------------------------------
-  # TESTS
+  # TESTS — `npm test` de chaque projet (vitest côté frontend, jest côté
+  # api), dans son propre dossier.
   # ---------------------------------------------------------------------
   unit-tests:
     needs: build
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend, api]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: node_modules
-          path: node_modules/
-      - run: npm run test:unit
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - working-directory: ${{ matrix.app }}
+        run: npm ci
+      - working-directory: ${{ matrix.app }}
+        run: npm test
 
-  # Base commune : service PostgreSQL (équivalent du template .with-postgres)
-  functional-tests:
-    needs: build
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: undercoverinfinite
-          POSTGRES_PASSWORD: undercoverinfinite
-          POSTGRES_DB: undercoverinfinite_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - run: npm ci
-      - run: npm run test:functional
+  # e2e-tests : désactivé pour l'instant, aucun e2e n'est encore écrit/branché
+  # côté frontend (pas de Playwright installé) ni câblé correctement côté
+  # api (son vrai e2e Jest existe dans api/test/app.e2e-spec.ts mais n'est
+  # pas ce que ce job lançait). À réactiver une fois les e2e réellement en
+  # place, avec working-directory par appli comme les autres jobs.
+  # e2e-tests:
+  #   needs: build
+  #   if: github.event_name == 'pull_request'
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: mcr.microsoft.com/playwright:v1.61.1-noble
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - run: npm ci
+  #     - run: npm run build
+  #     - run: npm run test:e2e
+  #     - uses: actions/upload-artifact@v7
+  #       if: always()
+  #       with:
+  #         name: playwright-report
+  #         path: playwright-report/
+  #         retention-days: 7
 
-  e2e-tests:
-    needs: build
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.61.1-noble
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm ci
-      - run: npm run build
-      - run: npm run test:e2e
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
-
-  # Couverture de code (tests unitaires + fonctionnels)
-  coverage:
-    needs: build
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: undercoverinfinite
-          POSTGRES_PASSWORD: undercoverinfinite
-          POSTGRES_DB: undercoverinfinite_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - run: npm ci
-      - run: npm run test:coverage
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage/cobertura-coverage.xml
-      # Pour publier la couverture en commentaire de PR (équivalent du "coverage:"
-      # GitLab qui parse le pourcentage), on peut ajouter par exemple :
-      # - uses: irongut/CodeCoverageSummary@v1.3.0
-      #   with:
-      #     filename: coverage/cobertura-coverage.xml
+  # coverage : désactivé pour l'instant, même souci que e2e-tests — tourne
+  # à la racine (pas de package.json) et appelle `npm run test:coverage`,
+  # qui n'existe dans aucun des deux package.json (frontend/api). À
+  # réactiver en matrice frontend/api (vitest --coverage / jest --coverage)
+  # une fois les scripts npm correspondants ajoutés.
+  # coverage:
+  #   needs: build
+  #   if: github.event_name == 'pull_request'
+  #   runs-on: ubuntu-latest
+  #   services:
+  #     postgres:
+  #       image: postgres:18-alpine
+  #       env:
+  #         POSTGRES_USER: undercoverinfinite
+  #         POSTGRES_PASSWORD: undercoverinfinite
+  #         POSTGRES_DB: undercoverinfinite_test
+  #       ports:
+  #         - 5432:5432
+  #       options: >-
+  #         --health-cmd "pg_isready -U undercoverinfinite -d undercoverinfinite_test"
+  #         --health-interval 5s
+  #         --health-timeout 5s
+  #         --health-retries 10
+  #   env:
+  #     DATABASE_URL: postgresql://undercoverinfinite:undercoverinfinite@localhost:5432/undercoverinfinite_test?schema=public
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: actions/setup-node@v7
+  #       with:
+  #         node-version: ${{ env.NODE_VERSION }}
+  #     - run: npm ci
+  #     - run: npm run test:coverage
+  #     - uses: actions/upload-artifact@v7
+  #       with:
+  #         name: coverage-report
+  #         path: coverage/cobertura-coverage.xml
+  #     # Pour publier la couverture en commentaire de PR (équivalent du "coverage:"
+  #     # GitLab qui parse le pourcentage), on peut ajouter par exemple :
+  #     # - uses: irongut/CodeCoverageSummary@v1.3.0
+  #     #   with:
+  #     #     filename: coverage/cobertura-coverage.xml
 
   # ---------------------------------------------------------------------
   # SCAN — dépendances npm vulnérables, secrets, mauvaises configs (pas les images)
@@ -147,13 +145,13 @@ jobs:
   # avec un correctif disponible, pour limiter le bruit des CVE non-fixables.
   # ---------------------------------------------------------------------
   trivy-scan-repo:
-    needs: [unit-tests, functional-tests, e2e-tests]
+    needs: [unit-tests]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Scan du dépôt (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -179,16 +177,16 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
-          context: .
-          file: docker/Dockerfile
+          context: ./frontend
+          file: frontend/Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/app:${{ github.sha }}
@@ -201,16 +199,16 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
-          context: .
-          file: docker/Dockerfile.api
+          context: ./api
+          file: api/Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/api:${{ github.sha }}
@@ -226,7 +224,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -243,7 +241,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
