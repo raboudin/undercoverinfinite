@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `undercoverinfinite` is **Undercover Infinite**, a Cold-War-espionage social deduction party game (local pass-and-play on mobile + a networked online lobby on web). It's a monorepo-by-convention (no workspace tooling) with two independent Node projects:
 
-- `frontend/` — Nuxt 4 app with a ported design system (Tailwind theme tokens + Vue components).
+- `frontend/` — Nuxt 4 app with a ported design system (Tailwind theme tokens + Vue components) **and a playable local pass-and-play game** (v1).
 - `api/` — NestJS backend with Prisma ORM, no domain models/routes yet.
 
-No game logic wires the two together yet — that's the next layer to build.
+The local mode is fully playable client-side and never calls `api/`. The networked online lobby is the next layer to build — that's what will finally wire the two projects together.
 
 ## Commands
 
@@ -40,6 +40,20 @@ npm run prisma:migrate       # create/apply a dev migration
 npm run prisma:studio        # open Prisma Studio
 ```
 
+**Don't strip `--experimental-vm-modules` from the jest scripts.** Prisma 7's generated client loads its query compiler as WASM through a dynamic `import()`. Jest's default CJS VM refuses that with `TypeError: A dynamic import callback was invoked without --experimental-vm-modules`, so any suite that boots a module touching `PrismaService` fails. The flag is why the scripts invoke `node ./node_modules/jest/bin/jest.js` instead of plain `jest`.
+
+Two related bits of jest config exist for the same reason and shouldn't be removed:
+- `moduleNameMapper: {"^(\\.{1,2}/.*)\\.js$": "$1"}` — source imports the generated client as `'../generated/prisma/client.js'` (required by `nodenext`) while the file on disk is `.ts`; jest doesn't know that convention and reports "Cannot find module".
+- `setupFiles: ["dotenv/config"]` — e2e boots `AppModule`, so `PrismaService` needs `DATABASE_URL`; in production `main.ts` loads it, but tests never go through `main.ts`.
+
+ESLint ignores `src/generated/**` (`eslint.config.mjs`) — the Prisma client is generated code, regenerated on every `npm install`.
+
+### CI
+
+`.github/workflows/ci-cd.yml` runs on every PR and every push to `main`: a `frontend` job (Vitest + `nuxt build`), an `api` job (ESLint, jest unit, jest e2e against a real Postgres service container, `nest build`), then a Trivy filesystem scan. Each job does its own `npm ci` in its subdirectory — there is no root `package.json`.
+
+`deploy.yml` and `rollback.yml` are **dormant**: they're leftovers from another project (MongoDB, `TMDB_API_KEY`, VPS secrets, Docker images that are never built here). Nothing calls `deploy.yml`, and `rollback.yml` would fail if triggered manually. Rewrite them when real hosting exists — don't wire them up as-is.
+
 ### Dev database
 
 ```bash
@@ -53,8 +67,9 @@ Copy `api/.env.example` to `api/.env` first — its `DATABASE_URL` default alrea
 ### frontend/
 
 - Uses Nuxt 4's `app/` directory convention — pages, components, assets, etc. live under `frontend/app/`, not the repo root.
-- `frontend/app/app.vue` — currently doubles as a design-system demo page (not real app routing yet).
-- `frontend/nuxt.config.ts` — registers `@tailwindcss/vite`, the global CSS entry, and the component auto-import dirs below.
+- `frontend/app/app.vue` — the shell: sticky header (logo mark + music mute toggle) wrapping `<NuxtPage />` in a `max-w-lg` mobile-first column. Screens don't repeat that chrome.
+- Routes: `/` is the game (`app/pages/index.vue`), `/design-system` is the component demo that used to live in `app.vue`.
+- `frontend/nuxt.config.ts` — registers `@tailwindcss/vite`, the global CSS entry, the component auto-import dirs below, and `app.head` (title, favicon, **Google Fonts for Oswald / Inter / Courier Prime**). Those three families are declared as tokens in `main.css` but aren't self-hosted — drop the stylesheet link and every `font-display`/`font-mono` silently falls back to a system font.
 - TypeScript config (`frontend/tsconfig.json`) references generated project configs under `.nuxt/` — run `npm install` or `npm run dev` at least once before IDE type-checking works.
 
 #### Design system
@@ -69,6 +84,19 @@ Ported from a Claude Design project (`claude.ai/design/p/002cef45-c285-4293-862f
   - `feedback/`: `Modal` (uses `Teleport(to="body")` — tests must clean up `document.body` between cases), `ProgressTimer`, `Toast`
 - Icons: `@lucide/vue` (not `lucide-vue-next`, which is deprecated), imported explicitly per component (e.g. `import { Eye } from '@lucide/vue'`) — not auto-imported.
 - Brand voice/content rules (French "tu", mission-briefing copy, no emoji, specific color/tone semantics) live in the source design project's `readme.md` / `SKILL.md`, not duplicated here — pull them via `DesignSync` if a future session needs the full guidelines while building real screens.
+
+#### Local game (pass-and-play v1)
+
+All game state is client-side; nothing here talks to `api/`.
+
+- `app/composables/useGame.ts` — the whole rules engine as a `createGame({ rng })` **factory**, not a module singleton, so every test starts clean and can inject a deterministic PRNG. Phases: `setup → reveal → describe → vote → elimination → (describe | victory)`. Civils win at zero live undercovers; undercovers win at parity (`aliveUndercovers >= aliveCivils`), which is also why `configure()` caps undercovers at `Math.floor((n - 1) / 2)` — start at parity and the game would be over before the first round.
+  - Imports `ref`/`computed` explicitly from `vue` and uses **relative** paths (`../data/word-pairs`), not the `~` alias: Vitest doesn't resolve Nuxt aliases or auto-imports.
+  - `app/pages/index.vue` destructures the returned refs so templates get auto-unwrapping — `game.phase` on a plain returned object stays a `Ref` in the template and won't compare against a string.
+- `app/components/game/` — six screen components (`SetupScreen`, `RevealScreen`, `DescribeScreen`, `VoteScreen`, `EliminationScreen`, `VictoryScreen`), auto-imported flat like the other dirs. They're presentational: props in, emits out, no game state of their own except `RevealScreen`'s local "dossier open" flag (which watches `player.id` so the word is hidden again before the phone changes hands) and `VoteScreen`'s pending accusation. They compose the existing design system only — don't add design-system components here.
+- `app/data/word-pairs.ts` — the French word pairs. Which side of a pair goes to the civils is drawn per game, so undercovers don't always inherit the same column.
+- Music: `app/composables/useBackgroundMusic.ts` (module-level shared state) + `public/audio/music-fond.mp3`. Playback **must** start from a real user gesture — it's kicked off by the "Lancer la mission" click, since browsers block autoplay. Mute state persists in `localStorage`.
+- Big binaries (the mp3) live in `public/`, not `assets/`, so Vite serves them directly instead of bundling them.
+  - **`public/audio/*.mp3` is gitignored** — a fresh clone won't have `music-fond.mp3`. The app still builds and runs; the `<audio>` fetch just 404s and the background music stays silent. Drop the file in by hand (it isn't fetched or generated by any script).
 
 ### api/
 
