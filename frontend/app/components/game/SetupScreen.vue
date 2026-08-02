@@ -2,11 +2,29 @@
 import { computed, ref, watch } from 'vue'
 import { Minus, Plus } from '@lucide/vue'
 import { MAX_PLAYERS, MIN_PLAYERS, maxUndercovers, type GameConfig } from '../../composables/useGame'
+import type { DailyWordsStatus } from '../../composables/useDailyWords'
 import logoFull from '../../assets/images/logo-full.png'
 
-defineProps<{ error?: string | null }>()
+const props = withDefaults(defineProps<{
+  error?: string | null
+  /** État du chargement des mots du jour ; `ready` par défaut pour rester neutre. */
+  wordsStatus?: DailyWordsStatus
+  /** Crédits restants aujourd'hui ; `null` tant que le lot n'est pas connu. */
+  remaining?: number | null
+  total?: number
+}>(), {
+  error: null,
+  wordsStatus: 'ready',
+  remaining: null,
+  total: 5
+})
 
-const emit = defineEmits<{ start: [GameConfig] }>()
+const emit = defineEmits<{ start: [GameConfig]; retry: [] }>()
+
+const exhausted = computed(() => props.wordsStatus === 'ready' && props.remaining === 0)
+const canLaunch = computed(
+  () => props.wordsStatus === 'ready' && (props.remaining === null || props.remaining > 0)
+)
 
 const names = ref<string[]>(['', '', '', ''])
 const undercoverCount = ref(1)
@@ -121,11 +139,38 @@ const inputClass
       </div>
     </Card>
 
+    <Card class="flex flex-col gap-2">
+      <div class="font-display text-body-s uppercase tracking-caps text-secondary">Mots du jour</div>
+
+      <p v-if="wordsStatus === 'loading' || wordsStatus === 'idle'" class="font-mono text-caption text-tertiary">
+        Contact du QG… récupération des mots du jour.
+      </p>
+
+      <template v-else-if="wordsStatus === 'error'">
+        <p class="text-body-s text-secondary">
+          Impossible de joindre le QG. Vérifie ta connexion, puis réessaie.
+        </p>
+        <Button size="s" variant="ghost" class="self-start" @click="emit('retry')">
+          Réessayer
+        </Button>
+      </template>
+
+      <template v-else>
+        <p v-if="exhausted" class="text-body-s text-secondary">
+          Le QG a épuisé ses mots pour aujourd'hui. Reviens demain, cinq nouvelles missions t'attendront.
+        </p>
+        <p v-else-if="remaining !== null" class="font-mono text-caption text-tertiary">
+          Missions restantes aujourd'hui : {{ remaining }} / {{ total }}
+        </p>
+      </template>
+    </Card>
+
     <Toast v-if="error" tone="danger">{{ error }}</Toast>
 
     <Button
       size="l"
       class="w-full"
+      :disabled="!canLaunch"
       @click="emit('start', { names, undercoverCount })"
     >
       Lancer la mission

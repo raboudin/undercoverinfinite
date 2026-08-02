@@ -86,4 +86,32 @@ describe('SetupScreen', () => {
     const wrapper = mount(SetupScreen, { props: { error: message }, global })
     expect(wrapper.findComponent(Toast).text()).toBe(message)
   })
+
+  it('affiche les crédits de mots restants du jour', () => {
+    const wrapper = mount(SetupScreen, { props: { remaining: 3, total: 5 }, global })
+    expect(wrapper.text()).toContain("Missions restantes aujourd'hui : 3 / 5")
+  })
+
+  it('bloque le lancement pendant le chargement des mots', () => {
+    const wrapper = mount(SetupScreen, { props: { wordsStatus: 'loading' as const }, global })
+    const launch = wrapper.findAllComponents(Button).at(-1)!
+    expect(launch.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('récupération des mots du jour')
+  })
+
+  it('bloque à quota épuisé et invite à revenir demain', () => {
+    const wrapper = mount(SetupScreen, { props: { remaining: 0 }, global })
+    const launch = wrapper.findAllComponents(Button).at(-1)!
+    expect(launch.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Reviens demain')
+  })
+
+  it('propose de réessayer quand les mots du jour sont injoignables', async () => {
+    const wrapper = mount(SetupScreen, { props: { wordsStatus: 'error' as const }, global })
+    const buttons = wrapper.findAllComponents(Button)
+
+    expect(buttons.at(-1)!.attributes('disabled')).toBeDefined()
+    await buttons[0]!.trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
 })
