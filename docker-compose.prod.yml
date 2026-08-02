@@ -24,6 +24,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-google/gemini-3.5-flash-lite}
+      LLM_GATEWAY_URL: ${LLM_GATEWAY_URL:-https://ai-gateway.vercel.sh/v1/chat/completions}
     depends_on:
       postgres:
         condition: service_healthy
