@@ -1,5 +1,10 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { WordsService, PAIRS_PER_DAY } from './words.service';
+import {
+  WordsService,
+  PAIRS_PER_DAY,
+  DEFAULT_MODEL,
+  DEFAULT_GATEWAY_URL,
+} from './words.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 const FIVE_PAIRS = [
@@ -59,6 +64,48 @@ describe('WordsService', () => {
 
   afterEach(() => {
     delete process.env.LLM_API_KEY;
+    delete process.env.LLM_MODEL;
+    delete process.env.LLM_GATEWAY_URL;
+  });
+
+  /** Amène les mocks dans l'état « lot manquant, génération nécessaire ». */
+  function primeGeneration() {
+    prisma.dailyWordPair.findMany
+      .mockResolvedValueOnce([]) // lot du jour : absent
+      .mockResolvedValueOnce([]) // historique récent pour le prompt
+      .mockResolvedValueOnce(rowsFor(FIVE_PAIRS)); // relecture après insertion
+    prisma.dailyWordPair.count.mockResolvedValue(0);
+    fetchMock.mockResolvedValue(gatewayResponse(JSON.stringify(FIVE_PAIRS)));
+  }
+
+  describe('config LLM par environnement', () => {
+    it('honore LLM_MODEL et LLM_GATEWAY_URL', async () => {
+      process.env.LLM_MODEL = 'openai/gpt-5-mini';
+      process.env.LLM_GATEWAY_URL = 'https://autre-gateway.test/v1/chat';
+      primeGeneration();
+
+      await service.getToday();
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://autre-gateway.test/v1/chat');
+      expect(JSON.parse(init.body as string)).toMatchObject({
+        model: 'openai/gpt-5-mini',
+      });
+    });
+
+    it('retombe sur les défauts quand les variables sont vides', async () => {
+      process.env.LLM_MODEL = '   ';
+      process.env.LLM_GATEWAY_URL = '';
+      primeGeneration();
+
+      await service.getToday();
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(DEFAULT_GATEWAY_URL);
+      expect(JSON.parse(init.body as string)).toMatchObject({
+        model: DEFAULT_MODEL,
+      });
+    });
   });
 
   describe('todayKey', () => {

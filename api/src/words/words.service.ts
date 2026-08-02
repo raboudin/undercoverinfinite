@@ -22,8 +22,21 @@ export const PAIRS_PER_DAY = 5;
 /** Le « jour » du jeu suit ce fuseau, côté cron comme côté clé de lot. */
 export const WORDS_TIMEZONE = 'Europe/Paris';
 
-const GATEWAY_URL = 'https://ai-gateway.vercel.sh/v1/chat/completions';
-const DEFAULT_MODEL = 'google/gemini-3.5-flash-lite';
+/**
+ * Config LLM entièrement pilotée par l'environnement : `LLM_API_KEY`
+ * (obligatoire), `LLM_MODEL` et `LLM_GATEWAY_URL` (optionnels, défauts
+ * ci-dessous). Changer de modèle ou de fournisseur OpenAI-compatible ne
+ * demande donc aucune modification de code.
+ */
+export const DEFAULT_GATEWAY_URL =
+  'https://ai-gateway.vercel.sh/v1/chat/completions';
+export const DEFAULT_MODEL = 'google/gemini-3.5-flash-lite';
+
+/** Lit une variable d'env en traitant vide/espaces comme absente. */
+function envOr(name: string, fallback: string): string {
+  const value = process.env[name]?.trim();
+  return value ? value : fallback;
+}
 
 /** Fenêtre passée réinjectée dans le prompt pour éviter les redites. */
 const AVOID_REPEATS_DAYS = 14;
@@ -126,11 +139,12 @@ export class WordsService {
   }
 
   private async callLlm(avoid: string[]): Promise<WordPairDto[]> {
-    const apiKey = process.env.LLM_API_KEY;
+    const apiKey = process.env.LLM_API_KEY?.trim();
     if (!apiKey) {
       throw new Error('LLM_API_KEY manquante : impossible de générer les mots');
     }
-    const model = process.env.LLM_MODEL ?? DEFAULT_MODEL;
+    const model = envOr('LLM_MODEL', DEFAULT_MODEL);
+    const gatewayUrl = envOr('LLM_GATEWAY_URL', DEFAULT_GATEWAY_URL);
 
     const avoidClause =
       avoid.length > 0
@@ -146,7 +160,7 @@ export class WordsService {
       '\nRéponds UNIQUEMENT avec un tableau JSON, sans texte autour, au format : ' +
       '[{"a":"Mot1","b":"Mot2"}, …]';
 
-    const response = await fetch(GATEWAY_URL, {
+    const response = await fetch(gatewayUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
