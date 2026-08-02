@@ -1,23 +1,24 @@
-name: CI/CD
+name: CI
 
-# Équivalent des rules GitLab :
-#   - merge_request_event  -> pull_request
-#   - push sur main         -> push (branches: main)
-#   - tag vX.Y.Z            -> push (tags: v*)
+# Le dépôt est un monorepo "par convention" : deux projets Node indépendants,
+# `frontend/` (Nuxt 4) et `api/` (NestJS + Prisma), sans outillage de workspace
+# et sans package.json à la racine. Chaque job fait donc son propre `npm ci`
+# dans son sous-dossier — il n'y a rien à installer au niveau racine.
+#
+# Les jobs de packaging Docker et de déploiement ont été retirés : ils
+# supposaient des Dockerfiles (`docker/Dockerfile`, `docker/Dockerfile.api`) et
+# des compose files (`docker-compose.staging.yml`, `docker-compose.prod.yml`)
+# qui n'existent pas dans ce dépôt. À réintroduire le jour où l'hébergement
+# sera réellement en place (voir deploy.yml / rollback.yml, dormants).
+
 on:
   pull_request:
   push:
     branches:
       - main
-    tags:
-      - "v*.*.*"
 
 env:
-  NODE_VERSION: "24"
-  HUSKY: "0"
-
-# Sur GitHub Actions, l'ordre des stages GitLab (build/test/scan/package)
-# se traduit par des dépendances "needs:" entre jobs plutôt que par des stages.
+  NODE_VERSION: "22"
 
 jobs:
   # ---------------------------------------------------------------------
@@ -33,8 +34,7 @@ jobs:
   # (vitest, jest introuvables au download). Chaque job refait son
   # `npm ci`, avec le cache npm natif de setup-node pour rester rapide.
   # ---------------------------------------------------------------------
-  build:
-    if: github.event_name == 'pull_request'
+  frontend:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -140,9 +140,9 @@ jobs:
   #     #     filename: coverage/cobertura-coverage.xml
 
   # ---------------------------------------------------------------------
-  # SCAN — dépendances npm vulnérables, secrets, mauvaises configs (pas les images)
-  # --exit-code 1 fait échouer le job uniquement sur les failles CRITICAL
-  # avec un correctif disponible, pour limiter le bruit des CVE non-fixables.
+  # SCAN — dépendances vulnérables, secrets committés, mauvaises configs.
+  # Échoue uniquement sur les failles CRITICAL disposant d'un correctif,
+  # pour éviter le bruit des CVE non corrigeables.
   # ---------------------------------------------------------------------
   trivy-scan-repo:
     needs: [unit-tests]
