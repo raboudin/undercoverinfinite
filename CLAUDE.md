@@ -54,9 +54,13 @@ ESLint ignores `src/generated/**` (`eslint.config.mjs`) — the Prisma client is
 
 ### CI
 
-`.github/workflows/ci-cd.yml` runs on every PR and every push to `main`: a `frontend` job (Vitest + `nuxt build`), an `api` job (ESLint, jest unit, jest e2e against a real Postgres service container, `nest build`), then a Trivy filesystem scan. Each job does its own `npm ci` in its subdirectory — there is no root `package.json`.
+`.github/workflows/ci-cd.yml` fait deux choses très différentes selon le déclencheur. Chaque job refait son `npm ci` dans son sous-dossier — il n'y a pas de `package.json` racine.
 
-`deploy.yml` and `rollback.yml` are **dormant**: they're leftovers from another project (MongoDB, `TMDB_API_KEY`, VPS secrets, Docker images that are never built here). Nothing calls `deploy.yml`, and `rollback.yml` would fail if triggered manually. Rewrite them when real hosting exists — don't wire them up as-is.
+- **Sur une pull request** : `build` (installe + construit les deux applis), `unit-tests` (matrice `frontend`/`api`, `npm test`), puis un scan Trivy du dépôt (`severity: CRITICAL`, `exit-code: 1` — une CVE critique **casse** la CI). Le job `e2e-tests` est **commenté** : `npm run test:e2e` ne tourne pas en CI, il faut le lancer à la main.
+- **Sur un push vers `main`** : build et push des images `ghcr.io/<repo>/{app,api}` (tags `<sha>` et `latest`), **puis `deploy-staging`**. Aucun test ne tourne sur ce déclencheur — ils sont supposés avoir été verts sur la PR.
+- **Sur un tag `vX.Y.Z`** : re-tag des images de ce SHA, puis `deploy-production`.
+
+**`deploy.yml` n'est pas dormant — il est branché et il déploie vraiment.** Pousser sur `main` met à jour staging sur le VPS ; taguer met à jour la production. Il copie le compose ciblé et un `.env` généré par SSH, puis `docker compose pull && up -d`. Ce `.env` prend `LLM_MODEL` et `LLM_GATEWAY_URL` dans les **Variables** GitHub (`vars.`), tout le reste dans les **Secrets** — une variable vide retombe sur le défaut du compose, qui vise le gateway Vercel. Les domaines sont figés dans les compose (`undercoverinfinite.com`, `staging.` et `api[-staging].`), routés par Traefik sur le réseau externe `proxy` avec le certresolver `le`.
 
 ### Dev database
 
