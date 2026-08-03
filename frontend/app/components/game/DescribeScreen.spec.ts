@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import DescribeScreen from './DescribeScreen.vue'
 import Button from '../core/Button.vue'
@@ -59,5 +59,114 @@ describe('DescribeScreen', () => {
 
     await last.findComponent(Button).trigger('click')
     expect(last.emitted('next')).toHaveLength(1)
+  })
+})
+
+describe('DescribeScreen — mode défi', () => {
+  it('n’affiche aucun défi par défaut', () => {
+    expect(mountScreen(0).text()).not.toContain('Défi de la mission')
+  })
+
+  it('affiche le défi de la partie', () => {
+    const wrapper = mount(DescribeScreen, {
+      props: {
+        round: 1,
+        speaker: order[0]!,
+        order,
+        speakerIndex: 0,
+        challenge: 'Chaque description doit contenir une couleur'
+      },
+      global
+    })
+
+    expect(wrapper.text()).toContain('Défi de la mission')
+    expect(wrapper.text()).toContain('Chaque description doit contenir une couleur')
+  })
+})
+
+describe('DescribeScreen — mode chrono', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function timed(props: Record<string, unknown> = {}) {
+    return mount(DescribeScreen, {
+      props: {
+        round: 1,
+        speaker: order[0]!,
+        order,
+        speakerIndex: 0,
+        timed: true,
+        timerSeconds: 10,
+        ...props
+      },
+      global
+    })
+  }
+
+  it('affiche le temps restant à la place de l’avancement', () => {
+    expect(timed().text()).toContain('10s')
+  })
+
+  it('décompte seconde par seconde', async () => {
+    const wrapper = timed()
+
+    vi.advanceTimersByTime(3000)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('7s')
+    expect(wrapper.findComponent(ProgressTimer).props('pct')).toBeCloseTo(0.7)
+  })
+
+  it('passe en alerte dans le dernier quart', async () => {
+    const wrapper = timed()
+    expect(wrapper.findComponent(ProgressTimer).props('danger')).toBe(false)
+
+    vi.advanceTimersByTime(8000)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent(ProgressTimer).props('danger')).toBe(true)
+  })
+
+  it('passe la main toute seule à l’expiration', async () => {
+    const wrapper = timed()
+
+    vi.advanceTimersByTime(10000)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('next')).toHaveLength(1)
+  })
+
+  it('n’émet next qu’une fois : le minuteur s’arrête à zéro', async () => {
+    const wrapper = timed()
+
+    vi.advanceTimersByTime(30000)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('next')).toHaveLength(1)
+  })
+
+  it('repart à plein temps à l’agent suivant', async () => {
+    const wrapper = timed()
+    vi.advanceTimersByTime(4000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('6s')
+
+    await wrapper.setProps({ speakerIndex: 1, speaker: order[1]! })
+
+    expect(wrapper.text()).toContain('10s')
+  })
+
+  it('ne minute rien hors du mode chrono', async () => {
+    const wrapper = mountScreen(0)
+
+    vi.advanceTimersByTime(60000)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('next')).toBeUndefined()
   })
 })

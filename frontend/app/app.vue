@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Volume2, VolumeX } from '@lucide/vue'
+import { ShoppingBag, Volume2, VolumeX } from '@lucide/vue'
 import { useBackgroundMusic } from '~/composables/useBackgroundMusic'
 import logoMark from '~/assets/images/logo-mark.png'
 
@@ -24,6 +24,11 @@ const { label: agentLabel, resolved: sessionResolved, pending: authPending, logo
             :pending="authPending"
             @logout="logout()"
           />
+          <NuxtLink to="/boutique" aria-label="Équipement">
+            <IconButton :size="34" tabindex="-1">
+              <ShoppingBag :size="15" />
+            </IconButton>
+          </NuxtLink>
           <IconButton
             :size="34"
             :active="!music.muted.value"

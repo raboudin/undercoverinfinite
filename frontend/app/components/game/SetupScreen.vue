@@ -1,41 +1,110 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Minus, Plus } from '@lucide/vue'
-import { MAX_PLAYERS, MIN_PLAYERS, maxUndercovers, type GameConfig } from '../../composables/useGame'
-import type { DailyWordsStatus } from '../../composables/useDailyWords'
+import {
+  DEFAULT_TIMER_SECONDS,
+  MAX_PLAYERS,
+  MAX_TIMER_SECONDS,
+  MIN_PLAYERS,
+  MIN_TIMER_SECONDS,
+  maxUndercovers,
+  type GameConfig,
+  type WordPair
+} from '../../composables/useGame'
+import type {
+  Credits,
+  EntitlementsStatus,
+  ModeId,
+  ThemeId
+} from '../../composables/useEntitlements'
+import type { WordsErrorKind } from '../../composables/useWords'
+import type { ModeChoice } from './ModeSelector.vue'
+import type { ThemeChoice } from './ThemeSelector.vue'
 import logoFull from '../../assets/images/logo-full.png'
+
+export interface SetupSubmission {
+  config: GameConfig
+  theme: ThemeId
+  /** Mots saisis à la main (DIY). `null` = le serveur les fournit. */
+  custom: WordPair | null
+}
 
 const props = withDefaults(defineProps<{
   error?: string | null
-  /** État du chargement des mots du jour ; `ready` par défaut pour rester neutre. */
-  wordsStatus?: DailyWordsStatus
-  /** Crédits restants aujourd'hui ; `null` tant que le lot n'est pas connu. */
-  remaining?: number | null
-  total?: number
+  /** Modes proposés, hors DIY qui n'est pas un mode mais une source de mots. */
+  modes?: ModeChoice[]
+  themes?: ThemeChoice[]
+  /** DIY débloqué (pack infinite). */
+  diyUnlocked?: boolean
+  status?: EntitlementsStatus
+  credits?: Credits | null
+  /** Un tirage est en cours côté serveur. */
+  drawing?: boolean
+  wordsError?: string | null
+  wordsErrorKind?: WordsErrorKind | null
 }>(), {
   error: null,
-  wordsStatus: 'ready',
-  remaining: null,
-  total: 5
+  modes: () => [],
+  themes: () => [],
+  diyUnlocked: false,
+  status: 'ready',
+  credits: null,
+  drawing: false,
+  wordsError: null,
+  wordsErrorKind: null
 })
 
-const emit = defineEmits<{ start: [GameConfig]; retry: [] }>()
-
-const exhausted = computed(() => props.wordsStatus === 'ready' && props.remaining === 0)
-const canLaunch = computed(
-  () => props.wordsStatus === 'ready' && (props.remaining === null || props.remaining > 0)
-)
+const emit = defineEmits<{
+  start: [SetupSubmission]
+  retry: []
+  boutique: []
+}>()
 
 const names = ref<string[]>(['', '', '', ''])
 const undercoverCount = ref(1)
+const mode = ref<ModeId>('classique')
+const theme = ref<ThemeId>('general')
+const timerSeconds = ref(DEFAULT_TIMER_SECONDS)
+const useCustomWords = ref(false)
+const customA = ref('')
+const customB = ref('')
 
 const undercoverCeiling = computed(() => maxUndercovers(names.value.length))
 const civilCount = computed(() => names.value.length - undercoverCount.value)
+
+const isTimed = computed(() => mode.value === 'chrono')
+const isSpicy = computed(() => props.modes.find(item => item.id === mode.value)?.spicy === true)
 
 // Réduire l'effectif peut rendre le nombre d'undercovers illégal : on le
 // ramène sous le plafond plutôt que de laisser passer une config invalide.
 watch(undercoverCeiling, ceiling => {
   if (undercoverCount.value > ceiling) undercoverCount.value = ceiling
+})
+
+// Perdre le pack (déconnexion) doit refermer la saisie manuelle, sinon
+// l'écran promettrait une option que le joueur n'a plus.
+watch(() => props.diyUnlocked, unlocked => {
+  if (!unlocked) useCustomWords.value = false
+})
+
+/**
+ * Les mots maison ne coûtent pas de crédit : ils ne demandent ni appel LLM ni
+ * tirage. Le quota ne bloque donc pas ce chemin.
+ */
+const customWordsReady = computed(() => {
+  const a = customA.value.trim()
+  const b = customB.value.trim()
+  return a.length > 0 && b.length > 0 && a.toLocaleLowerCase() !== b.toLocaleLowerCase()
+})
+
+const outOfCredits = computed(
+  () => props.status === 'ready' && !useCustomWords.value && (props.credits?.remaining ?? 0) === 0
+)
+
+const canLaunch = computed(() => {
+  if (props.status !== 'ready' || props.drawing) return false
+  if (useCustomWords.value) return customWordsReady.value
+  return (props.credits?.remaining ?? 0) > 0
 })
 
 function setPlayerCount(count: number) {
@@ -53,6 +122,26 @@ function setUndercoverCount(count: number) {
   undercoverCount.value = count
 }
 
+function setTimer(seconds: number) {
+  if (seconds < MIN_TIMER_SECONDS || seconds > MAX_TIMER_SECONDS) return
+  timerSeconds.value = seconds
+}
+
+function start() {
+  emit('start', {
+    config: {
+      names: names.value,
+      undercoverCount: undercoverCount.value,
+      mode: mode.value,
+      timerSeconds: timerSeconds.value
+    },
+    theme: theme.value,
+    custom: useCustomWords.value
+      ? { a: customA.value.trim(), b: customB.value.trim() }
+      : null
+  })
+}
+
 const inputClass
   = 'w-full rounded-sm border border-subtle bg-surface-inset px-3 py-2.5 text-body text-primary '
     + 'placeholder:text-tertiary focus:border-strong focus:outline-none focus:ring-1 focus:ring-focus-ring'
@@ -67,6 +156,30 @@ const inputClass
         Un agent double se cache parmi vous.
       </p>
     </div>
+
+    <ModeSelector v-model="mode" :modes="modes" @locked="emit('boutique')" />
+
+    <Card v-if="isTimed" class="flex items-center justify-between gap-4">
+      <div>
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Temps de parole</div>
+        <div class="mt-0.5 font-mono text-caption text-tertiary">par agent et par manche</div>
+      </div>
+      <div class="flex items-center gap-3">
+        <IconButton :size="36" aria-label="Réduire le temps de parole" @click="setTimer(timerSeconds - 5)">
+          <Minus :size="16" />
+        </IconButton>
+        <span class="w-12 text-center font-display text-display-s text-primary">{{ timerSeconds }}s</span>
+        <IconButton :size="36" aria-label="Augmenter le temps de parole" @click="setTimer(timerSeconds + 5)">
+          <Plus :size="16" />
+        </IconButton>
+      </div>
+    </Card>
+
+    <Toast v-if="isSpicy" tone="danger">
+      Mode hot : mots réservés à un public adulte.
+    </Toast>
+
+    <ThemeSelector v-model="theme" :themes="themes" @locked="emit('boutique')" />
 
     <Card class="flex flex-col gap-5">
       <div class="flex items-center justify-between gap-4">
@@ -139,41 +252,94 @@ const inputClass
       </div>
     </Card>
 
-    <Card class="flex flex-col gap-2">
-      <div class="font-display text-body-s uppercase tracking-caps text-secondary">Mots du jour</div>
-
-      <p v-if="wordsStatus === 'loading' || wordsStatus === 'idle'" class="font-mono text-caption text-tertiary">
-        Contact du QG… récupération des mots du jour.
-      </p>
-
-      <template v-else-if="wordsStatus === 'error'">
-        <p class="text-body-s text-secondary">
-          Impossible de joindre le QG. Vérifie ta connexion, puis réessaie.
-        </p>
-        <Button size="s" variant="ghost" class="self-start" @click="emit('retry')">
-          Réessayer
+    <Card class="flex flex-col gap-3">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Mots de la mission</div>
+          <div class="mt-0.5 font-mono text-caption text-tertiary">
+            <template v-if="useCustomWords">Écrits par toi — aucune mission consommée.</template>
+            <template v-else>Transmis par le QG à l'ouverture de la mission.</template>
+          </div>
+        </div>
+        <Button
+          v-if="diyUnlocked"
+          size="s"
+          :variant="useCustomWords ? 'secondary' : 'ghost'"
+          class="shrink-0"
+          @click="useCustomWords = !useCustomWords"
+        >
+          {{ useCustomWords ? 'Laisser le QG' : 'DIY' }}
         </Button>
+      </div>
+
+      <template v-if="useCustomWords">
+        <label class="flex flex-col gap-1.5">
+          <span class="font-mono text-caption uppercase tracking-caps text-tertiary">Mot des loyaux</span>
+          <input v-model="customA" :class="inputClass" type="text" maxlength="32" placeholder="Café" autocomplete="off" >
+        </label>
+        <label class="flex flex-col gap-1.5">
+          <span class="font-mono text-caption uppercase tracking-caps text-tertiary">Mot des infiltrés</span>
+          <input v-model="customB" :class="inputClass" type="text" maxlength="32" placeholder="Thé" autocomplete="off" >
+        </label>
+        <p v-if="!customWordsReady" class="font-mono text-caption text-tertiary">
+          Deux mots, proches mais différents.
+        </p>
       </template>
 
       <template v-else>
-        <p v-if="exhausted" class="text-body-s text-secondary">
-          Le QG a épuisé ses mots pour aujourd'hui. Reviens demain, cinq nouvelles missions t'attendront.
+        <p v-if="status === 'loading' || status === 'idle'" class="font-mono text-caption text-tertiary">
+          Contact du QG… vérification de ton dossier.
         </p>
-        <p v-else-if="remaining !== null" class="font-mono text-caption text-tertiary">
-          Missions restantes aujourd'hui : {{ remaining }} / {{ total }}
-        </p>
+
+        <template v-else-if="status === 'error'">
+          <p class="text-body-s text-secondary">
+            Impossible de joindre le QG. Vérifie ta connexion, puis réessaie.
+          </p>
+          <Button size="s" variant="ghost" class="self-start" @click="emit('retry')">
+            Réessayer
+          </Button>
+        </template>
+
+        <template v-else-if="credits">
+          <p v-if="outOfCredits" class="text-body-s text-secondary">
+            Tu as épuisé tes missions du jour. Elles reviennent à minuit — ou tout de suite avec un pack.
+          </p>
+          <p v-else class="font-mono text-caption text-tertiary">
+            Missions restantes aujourd'hui : {{ credits.remaining }}
+            <template v-if="credits.wallet > 0">
+              ({{ credits.dailyRemaining }} du jour + {{ credits.wallet }} en réserve)
+            </template>
+            <template v-else>/ {{ credits.dailyLimit }}</template>
+          </p>
+          <Button v-if="outOfCredits" size="s" variant="ghost" class="self-start" @click="emit('boutique')">
+            Voir les packs
+          </Button>
+        </template>
       </template>
     </Card>
 
     <Toast v-if="error" tone="danger">{{ error }}</Toast>
 
+    <template v-if="wordsError">
+      <Toast tone="danger">{{ wordsError }}</Toast>
+      <Button
+        v-if="wordsErrorKind === 'locked' || wordsErrorKind === 'credits'"
+        size="s"
+        variant="ghost"
+        class="self-start"
+        @click="emit('boutique')"
+      >
+        Voir les packs
+      </Button>
+    </template>
+
     <Button
       size="l"
       class="w-full"
       :disabled="!canLaunch"
-      @click="emit('start', { names, undercoverCount })"
+      @click="start()"
     >
-      Lancer la mission
+      {{ drawing ? 'Contact du QG…' : 'Lancer la mission' }}
     </Button>
   </div>
 </template>
