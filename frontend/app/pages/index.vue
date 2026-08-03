@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { createGame, type GameConfig } from '~/composables/useGame'
-import { createDailyWords } from '~/composables/useDailyWords'
+import { computed, onMounted, ref } from 'vue'
+import { createGame, type GameConfig, type WordPair } from '~/composables/useGame'
+import type { ThemeId } from '~/composables/useEntitlements'
 import { useBackgroundMusic } from '~/composables/useBackgroundMusic'
+import type { SetupSubmission } from '~/components/game/SetupScreen.vue'
 
 // Déstructuré pour que le template profite du déballage automatique des refs.
 const {
@@ -14,54 +15,106 @@ const {
   lastEliminated,
   winner,
   error,
+  names,
+  undercoverCount,
+  mode,
+  timerSeconds,
+  challenge,
   alivePlayers,
   currentRevealPlayer,
   isLastReveal,
   speakingOrder,
   currentSpeaker,
+  isTimed,
+  settlement,
   configure,
   nextReveal,
   nextSpeaker,
+  placeBets,
   eliminate,
   resolveElimination,
   replaySameTeam,
   newGame
 } = createGame()
 
-const runtimeConfig = useRuntimeConfig()
-const words = createDailyWords({ apiBase: runtimeConfig.public.apiBase })
-const {
-  status: wordsStatus,
-  remaining,
-  total,
-  nextPair,
-  refresh: refreshWords,
-  consume: consumeWord
-} = words
+const nuxtApp = useNuxtApp()
+const entitlements = nuxtApp.$entitlements
+const words = nuxtApp.$words
 
-// Client uniquement : fetch de l'API + lecture du localStorage.
+const {
+  status: rightsStatus,
+  credits,
+  modes,
+  modeCards,
+  themeCards,
+  applyCredits,
+  refresh: refreshRights
+} = entitlements
+const { status: wordsStatus, error: wordsError, errorKind: wordsErrorKind } = words
+
+// Client uniquement : les droits dépendent de cookies que le rendu serveur ne
+// relaie pas.
 onMounted(() => {
-  void refreshWords()
+  if (rightsStatus.value !== 'ready') void refreshRights()
 })
 
 const music = useBackgroundMusic()
 
-function start(config: GameConfig) {
-  const pair = nextPair.value
-  if (!pair) return
-  if (configure(config, pair)) {
-    // La partie démarre vraiment : le crédit est consommé maintenant, jamais
-    // sur une config invalide.
-    consumeWord()
+/** DIY n'est pas un mode de jeu mais une source de mots : il sort de la grille. */
+const playableModes = computed(() => modeCards.value.filter(mode => mode.id !== 'diy'))
+/**
+ * Une partie DIY n'appelle pas l'API — elle ne consomme ni crédit ni mots. Le
+ * verrou est donc purement local : ce que le joueur y gagne (écrire ses mots)
+ * ne coûte rien au serveur, il n'y a rien à protéger côté API.
+ */
+const diyUnlocked = computed(() => modes.value.includes('diy'))
+
+const drawing = computed(() => wordsStatus.value === 'drawing')
+const canReplay = computed(() => lastRequest.value !== null && credits.value.remaining > 0)
+
+/** Ce qui a servi à lancer la partie, pour pouvoir la rejouer à l'identique. */
+const lastRequest = ref<{ theme: ThemeId, custom: WordPair | null } | null>(null)
+
+/**
+ * Récupère les mots d'une partie : saisie manuelle, ou tirage serveur — qui
+ * débite le crédit et peut renvoyer un défi.
+ */
+async function fetchSetup(submission: { config: GameConfig, theme: ThemeId, custom: WordPair | null }) {
+  if (submission.custom) return { pair: submission.custom, challenge: null }
+
+  const draw = await words.draw(submission.config.mode, submission.theme)
+  if (!draw) return null
+
+  // Le serveur fait autorité sur le solde : on prend le sien plutôt que de
+  // décrémenter dans notre coin.
+  applyCredits(draw.credits)
+  return { pair: draw.pair, challenge: draw.challenge }
+}
+
+async function start(submission: SetupSubmission) {
+  const setup = await fetchSetup(submission)
+  if (!setup) return
+
+  if (configure(submission.config, setup)) {
+    lastRequest.value = { theme: submission.theme, custom: submission.custom }
     // Le clic est le geste utilisateur qui débloque l'autoplay du navigateur.
     void music.start()
   }
 }
 
-// Rejouer est une nouvelle partie : nouveau crédit, nouvelle paire.
-function replay() {
-  const pair = consumeWord()
-  if (pair) replaySameTeam(pair)
+// Rejouer est une nouvelle partie : nouveaux mots, donc nouvelle mission
+// consommée — sauf en DIY, où l'équipe reprend ses propres mots et où rien
+// n'est débité. Le mode et l'équipe, eux, ne bougent pas.
+async function replay() {
+  const previous = lastRequest.value
+  if (!previous) return
+
+  const setup = await fetchSetup({
+    config: { names: names.value, undercoverCount: undercoverCount.value, mode: mode.value },
+    theme: previous.theme,
+    custom: previous.custom
+  })
+  if (setup) replaySameTeam(setup)
 }
 </script>
 
@@ -69,11 +122,17 @@ function replay() {
   <SetupScreen
     v-if="phase === 'setup'"
     :error="error"
-    :words-status="wordsStatus"
-    :remaining="wordsStatus === 'ready' ? remaining : null"
-    :total="total"
+    :modes="playableModes"
+    :themes="themeCards"
+    :diy-unlocked="diyUnlocked"
+    :status="rightsStatus"
+    :credits="rightsStatus === 'ready' ? credits : null"
+    :drawing="drawing"
+    :words-error="wordsError"
+    :words-error-kind="wordsErrorKind"
     @start="start"
-    @retry="refreshWords"
+    @retry="refreshRights"
+    @boutique="navigateTo('/boutique')"
   />
 
   <RevealScreen
@@ -91,7 +150,17 @@ function replay() {
     :speaker="currentSpeaker"
     :order="speakingOrder"
     :speaker-index="speakerIndex"
+    :timed="isTimed"
+    :timer-seconds="timerSeconds"
+    :challenge="challenge"
     @next="nextSpeaker"
+  />
+
+  <BetScreen
+    v-else-if="phase === 'bets'"
+    :round="round"
+    :players="alivePlayers"
+    @place="placeBets"
   />
 
   <VoteScreen
@@ -111,7 +180,8 @@ function replay() {
     v-else-if="phase === 'victory' && winner"
     :winner="winner"
     :players="players"
-    :can-replay="remaining > 0"
+    :can-replay="canReplay"
+    :settlement="settlement"
     @replay="replay"
     @new-game="newGame"
   />
