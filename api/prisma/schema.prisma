@@ -13,6 +13,47 @@ datasource db {
   provider = "postgresql"
 }
 
+// Compte joueur. Les deux modes d'authentification cohabitent sur la même ligne :
+// `passwordHash` est nul pour un compte né d'un OAuth, `googleId`/`facebookId`
+// sont nuls tant que le fournisseur correspondant n'est pas lié. Un même email
+// ne peut donc exister qu'une fois, quel que soit le chemin d'inscription.
+// (Ajouter un fournisseur = une colonne `<provider>Id` de plus ; au-delà de
+// trois ou quatre, basculer sur une table `oauth_accounts` dédiée.)
+model User {
+  id           String   @id @default(cuid())
+  // Toujours stocké en minuscules — la normalisation se fait dans AuthService.
+  email        String   @unique
+  passwordHash String?
+  displayName  String?
+  googleId     String?  @unique
+  facebookId   String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// Refresh tokens émis, un par session vivante. Le token lui-même n'est jamais
+// stocké : seul son SHA-256 l'est (`tokenHash`), ce qui laisse la recherche en
+// O(1) sur un index unique tout en rendant un dump de base inexploitable.
+// La rotation révoque la ligne (`revokedAt`) au lieu de la supprimer : c'est ce
+// qui permet de détecter la réutilisation d'un token déjà consommé.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
 // Lot quotidien de paires de mots générées par LLM : `day` est la date (Europe/Paris)
 // du lot, `position` l'index 0..4 de la paire dans le lot. Le côté de la paire
 // attribué aux civils reste tiré au sort côté client, comme avant.
