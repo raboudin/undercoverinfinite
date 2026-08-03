@@ -12,7 +12,7 @@ import { TokenService } from './token.service';
 /**
  * Les stratégies OAuth ne sont branchées que si leurs credentials existent :
  * `new GoogleStrategy(...)` sans `clientID` lève à la construction, ce qui
- * ferait échouer le démarrage de toute l'API (y compris `/words/today`) sur
+ * ferait échouer le démarrage de toute l'API (y compris le tirage des mots) sur
  * un environnement qui n'utilise que le login classique.
  */
 function configuredOAuthStrategies(): Provider[] {
@@ -57,6 +57,10 @@ function configuredOAuthStrategies(): Provider[] {
     JwtStrategy,
     ...configuredOAuthStrategies(),
   ],
-  exports: [AuthService, TokenService],
+  // `AUTH_CONFIG` et `PassportModule` sont exportés pour les modules qui
+  // reconnaissent une session sans la gérer (cf. `EntitlementsModule`) : le
+  // premier porte les réglages de cookie, le second la stratégie `jwt` dont
+  // dépend `AuthGuard('jwt')`.
+  exports: [AuthService, TokenService, AUTH_CONFIG, PassportModule],
 })
 export class AuthModule {}
