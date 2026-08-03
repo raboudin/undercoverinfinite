@@ -1,9 +1,11 @@
 import { computed, ref } from 'vue'
+import { settleStakes, type Bet, type Settlement } from './useBets'
+import type { ModeId } from './useEntitlements'
 
 /**
  * Deux mots proches mais distincts : les civils reçoivent l'un, les
- * undercovers l'autre. Les paires viennent de l'API (lot quotidien généré
- * par LLM) — il n'y a plus de liste locale.
+ * undercovers l'autre. La paire vient de l'API, tirée à la demande pour cette
+ * partie — il n'y a pas de liste locale.
  */
 export interface WordPair {
   a: string
@@ -11,7 +13,8 @@ export interface WordPair {
 }
 
 export type Role = 'civil' | 'undercover'
-export type Phase = 'setup' | 'reveal' | 'describe' | 'vote' | 'elimination' | 'victory'
+export type Phase
+  = 'setup' | 'reveal' | 'describe' | 'bets' | 'vote' | 'elimination' | 'victory'
 export type Winner = 'civils' | 'undercovers' | null
 
 export interface Player {
@@ -25,10 +28,29 @@ export interface Player {
 export interface GameConfig {
   names: string[]
   undercoverCount: number
+  mode: ModeId
+  /** Secondes par prise de parole. Mode chrono uniquement. */
+  timerSeconds?: number
+}
+
+/**
+ * Ce que le serveur a préparé pour cette partie. `configure` le reçoit plutôt
+ * que d'aller le chercher : le moteur ne connaît ni l'API ni les crédits, ce
+ * qui le laisse testable sans réseau.
+ */
+export interface GameSetup {
+  pair: WordPair
+  /** Mode défi uniquement : la contrainte tenue par toute la table. */
+  challenge?: string | null
 }
 
 export const MIN_PLAYERS = 3
 export const MAX_PLAYERS = 12
+
+/** Durée par défaut d'une prise de parole en mode chrono. */
+export const DEFAULT_TIMER_SECONDS = 30
+export const MIN_TIMER_SECONDS = 10
+export const MAX_TIMER_SECONDS = 120
 
 /**
  * Les civils doivent être strictement majoritaires au lancement : à parité la
@@ -74,6 +96,34 @@ function deal(names: string[], undercoverCount: number, pair: WordPair, rng: () 
   })
 }
 
+/**
+ * Un pari doit désigner un vivant autre que soi : miser sur soi-même ferait
+ * de l'undercover un gagnant automatique, et le mode n'aurait plus de risque.
+ */
+function validateBets(bets: Bet[], alive: Player[]): string | null {
+  const ids = new Set(alive.map(player => player.id))
+
+  for (const bet of bets) {
+    if (!ids.has(bet.playerId) || !ids.has(bet.targetId)) {
+      return 'Chaque pari doit venir d’un agent encore en poste et viser un agent encore en poste.'
+    }
+    if (bet.playerId === bet.targetId) {
+      return 'On ne mise pas sur soi-même.'
+    }
+    if (!Number.isFinite(bet.stake) || bet.stake < 0) {
+      return 'Une mise ne peut pas être négative.'
+    }
+  }
+
+  if (new Set(bets.map(bet => bet.playerId)).size !== bets.length) {
+    return 'Un agent ne mise qu’une fois.'
+  }
+  if (bets.length !== alive.length) {
+    return 'Tout le monde doit miser avant l’ouverture du vote.'
+  }
+  return null
+}
+
 function validate(names: string[], undercoverCount: number): string | null {
   if (names.length < MIN_PLAYERS || names.length > MAX_PLAYERS) {
     return `Il faut entre ${MIN_PLAYERS} et ${MAX_PLAYERS} agents sur le terrain.`
@@ -112,6 +162,10 @@ export function createGame(options: { rng?: () => number } = {}) {
 
   const names = ref<string[]>([])
   const undercoverCount = ref(1)
+  const mode = ref<ModeId>('classique')
+  const timerSeconds = ref(DEFAULT_TIMER_SECONDS)
+  const challenge = ref<string | null>(null)
+  const bets = ref<Bet[]>([])
 
   const alivePlayers = computed(() => players.value.filter(player => player.alive))
   const aliveUndercovers = computed(
@@ -136,18 +190,48 @@ export function createGame(options: { rng?: () => number } = {}) {
   })
   const currentSpeaker = computed<Player | null>(() => speakingOrder.value[speakerIndex.value] ?? null)
 
+  /** Mode chrono : la seule différence est que la parole est minutée. */
+  const isTimed = computed(() => mode.value === 'chrono')
+
+  /**
+   * Les paris se placent une fois par partie, juste après la première manche
+   * de description : plus tôt, personne n'a d'indice ; à chaque manche, la
+   * table repasserait son temps à saisir des chiffres.
+   */
+  const needsBets = computed(() => mode.value === 'pari' && bets.value.length === 0)
+
+  /** Répartition des mises, calculée à la révélation des rôles. */
+  const settlement = computed<Settlement[]>(() => {
+    if (phase.value !== 'victory' || bets.value.length === 0) return []
+    const undercovers = new Set(
+      players.value.filter(player => player.role === 'undercover').map(player => player.id)
+    )
+    return settleStakes(bets.value, id => undercovers.has(id))
+  })
+
   function startRound(next: number) {
     round.value = next
     speakerIndex.value = 0
     phase.value = 'describe'
   }
 
+  /** Remet à zéro tout ce qui appartient à une partie et pas à l'équipe. */
+  function resetRound() {
+    revealIndex.value = 0
+    speakerIndex.value = 0
+    round.value = 0
+    lastEliminated.value = null
+    winner.value = null
+    bets.value = []
+  }
+
   /**
-   * La paire du jour est fournie par l'appelant (crédit quotidien) : elle
-   * n'est consommée que si la configuration est valide — un `false` ne doit
-   * pas brûler de crédit.
+   * Les mots viennent de l'appelant, qui les a obtenus du serveur contre un
+   * crédit. `configure` ne rend `true` que si la configuration tient : c'est ce
+   * qui permet d'appeler l'API **avant** et de ne rien perdre si le formulaire
+   * était invalide.
    */
-  function configure(config: GameConfig, pair: WordPair): boolean {
+  function configure(config: GameConfig, setup: GameSetup): boolean {
     const trimmed = config.names.map(name => name.trim())
     const problem = validate(trimmed, config.undercoverCount)
     error.value = problem
@@ -155,12 +239,11 @@ export function createGame(options: { rng?: () => number } = {}) {
 
     names.value = trimmed
     undercoverCount.value = config.undercoverCount
-    players.value = deal(trimmed, config.undercoverCount, pair, rng)
-    revealIndex.value = 0
-    speakerIndex.value = 0
-    round.value = 0
-    lastEliminated.value = null
-    winner.value = null
+    mode.value = config.mode
+    timerSeconds.value = config.timerSeconds ?? DEFAULT_TIMER_SECONDS
+    challenge.value = setup.challenge ?? null
+    players.value = deal(trimmed, config.undercoverCount, setup.pair, rng)
+    resetRound()
     phase.value = 'reveal'
     return true
   }
@@ -182,7 +265,23 @@ export function createGame(options: { rng?: () => number } = {}) {
       return
     }
     speakerIndex.value = 0
+    phase.value = needsBets.value ? 'bets' : 'vote'
+  }
+
+  /**
+   * Enregistre les mises et ouvre le vote. L'app ne fait que tenir les
+   * comptes : aucun paiement ne transite par elle, le règlement se fait entre
+   * joueurs à la fin.
+   */
+  function placeBets(next: Bet[]): boolean {
+    if (phase.value !== 'bets') return false
+    const problem = validateBets(next, alivePlayers.value)
+    error.value = problem
+    if (problem) return false
+
+    bets.value = next
     phase.value = 'vote'
+    return true
   }
 
   function eliminate(playerId: string): boolean {
@@ -210,26 +309,21 @@ export function createGame(options: { rng?: () => number } = {}) {
     startRound(round.value + 1)
   }
 
-  // Rejouer est une nouvelle partie : elle consomme un crédit, donc une
-  // nouvelle paire — sinon l'équipe rejouerait avec des mots déjà connus.
-  function replaySameTeam(pair: WordPair) {
-    players.value = deal(names.value, undercoverCount.value, pair, rng)
-    revealIndex.value = 0
-    speakerIndex.value = 0
-    round.value = 0
-    lastEliminated.value = null
-    winner.value = null
+  // Rejouer est une nouvelle partie : elle consomme un crédit, donc de
+  // nouveaux mots — sinon l'équipe rejouerait avec une paire déjà connue.
+  // Le mode et la durée de parole, eux, sont ceux de l'équipe : ils restent.
+  function replaySameTeam(setup: GameSetup) {
+    challenge.value = setup.challenge ?? null
+    players.value = deal(names.value, undercoverCount.value, setup.pair, rng)
+    resetRound()
     phase.value = 'reveal'
   }
 
   function newGame() {
     players.value = []
-    revealIndex.value = 0
-    speakerIndex.value = 0
-    round.value = 0
-    lastEliminated.value = null
-    winner.value = null
+    challenge.value = null
     error.value = null
+    resetRound()
     phase.value = 'setup'
   }
 
@@ -245,6 +339,10 @@ export function createGame(options: { rng?: () => number } = {}) {
     error,
     names,
     undercoverCount,
+    mode,
+    timerSeconds,
+    challenge,
+    bets,
     // dérivés
     alivePlayers,
     aliveUndercovers,
@@ -253,10 +351,14 @@ export function createGame(options: { rng?: () => number } = {}) {
     isLastReveal,
     speakingOrder,
     currentSpeaker,
+    isTimed,
+    needsBets,
+    settlement,
     // actions
     configure,
     nextReveal,
     nextSpeaker,
+    placeBets,
     eliminate,
     resolveElimination,
     replaySameTeam,
