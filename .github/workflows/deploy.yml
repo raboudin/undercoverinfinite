@@ -13,7 +13,15 @@ name: Deploy (réutilisable)
 #   VPS_DEPLOY_PATH          --> dossier racine sur le VPS (staging/ et production/ dedans)
 #   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB --> identifiants de la base
 #   LLM_API_KEY              --> clé du gateway LLM (génération des mots du jour)
+#   AUTH_JWT_SECRET          --> secret de signature des access tokens
+#                                (`openssl rand -hex 32`). L'API refuse de
+#                                démarrer sans, NODE_ENV valant production.
 #   (le registre utilisé ici est ghcr.io, connecté avec GITHUB_TOKEN)
+#
+# Secrets GitHub optionnels — absents, la connexion sociale correspondante
+# répond 503 mais le reste de l'API fonctionne :
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+#   FACEBOOK_CLIENT_ID / FACEBOOK_CLIENT_SECRET
 #
 # Variables GitHub optionnelles (Settings > Secrets and variables > Actions >
 # Variables) — non sensibles, laissées vides elles retombent sur les défauts
@@ -68,6 +76,11 @@ jobs:
           LLM_API_KEY=${{ secrets.LLM_API_KEY }}
           LLM_MODEL=${{ vars.LLM_MODEL }}
           LLM_GATEWAY_URL=${{ vars.LLM_GATEWAY_URL }}
+          AUTH_JWT_SECRET=${{ secrets.AUTH_JWT_SECRET }}
+          GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+          FACEBOOK_CLIENT_ID=${{ secrets.FACEBOOK_CLIENT_ID }}
+          FACEBOOK_CLIENT_SECRET=${{ secrets.FACEBOOK_CLIENT_SECRET }}
           EOF
           scp -i ~/.ssh/id_deploy .env.deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$DEPLOY_PATH/.env"
 

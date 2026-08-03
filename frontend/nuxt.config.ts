@@ -40,6 +40,7 @@ export default defineNuxtConfig({
     plugins: [tailwindcss()]
   },
   components: [
+    { path: '~/components/auth', pathPrefix: false },
     { path: '~/components/core', pathPrefix: false },
     { path: '~/components/data-display', pathPrefix: false },
     { path: '~/components/feedback', pathPrefix: false },
