@@ -42,6 +42,24 @@ services:
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-google/gemini-3.5-flash-lite}
       LLM_GATEWAY_URL: ${LLM_GATEWAY_URL:-https://ai-gateway.vercel.sh/v1/chat/completions}
+      # L'auth par cookies interdit `Access-Control-Allow-Origin: *` : la liste
+      # des origines autorisées doit être explicite, sinon le front n'obtient
+      # plus rien de l'API (y compris /words/today).
+      CORS_ORIGINS: https://staging.undercoverinfinite.com
+      # Sans ce secret, l'API refuse de démarrer (NODE_ENV=production).
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # Front et API partagent le domaine enregistrable undercoverinfinite.com :
+      # SameSite=Strict (défaut) fonctionne, et NODE_ENV=production impose déjà
+      # le flag Secure.
+      AUTH_API_URL: https://api-staging.undercoverinfinite.com
+      AUTH_OAUTH_SUCCESS_REDIRECT: https://staging.undercoverinfinite.com
+      # Un échec OAuth revient sur l'écran de connexion, avec ?error=…
+      AUTH_OAUTH_FAILURE_REDIRECT: https://staging.undercoverinfinite.com/connexion
+      # Vides = /auth/google et /auth/facebook répondent 503, le reste tourne.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID:-}
+      FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
