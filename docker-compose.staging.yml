@@ -44,7 +44,7 @@ services:
       LLM_GATEWAY_URL: ${LLM_GATEWAY_URL:-https://ai-gateway.vercel.sh/v1/chat/completions}
       # L'auth par cookies interdit `Access-Control-Allow-Origin: *` : la liste
       # des origines autorisées doit être explicite, sinon le front n'obtient
-      # plus rien de l'API (y compris /words/today).
+      # plus rien de l'API (y compris le tirage des mots).
       CORS_ORIGINS: https://staging.undercoverinfinite.com
       # Sans ce secret, l'API refuse de démarrer (NODE_ENV=production).
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
