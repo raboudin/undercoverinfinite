@@ -1,4 +1,7 @@
-import { ForbiddenException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type {
   CreditsDto,
   EntitlementsService,
@@ -176,10 +179,28 @@ describe('WordsService', () => {
     emptyPoolThenFilled();
     llm.complete.mockRejectedValue(new Error('gateway down'));
 
-    await expect(service.draw(SUBJECT, 'classique', 'general')).rejects.toThrow(
-      'gateway down',
-    );
+    await expect(
+      service.draw(SUBJECT, 'classique', 'general'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(entitlements.refundCredit).toHaveBeenCalledWith(SUBJECT, 'daily');
+  });
+
+  it('sort une panne de LLM en 503, sans exposer le détail technique', async () => {
+    emptyPoolThenFilled();
+    llm.complete.mockRejectedValue(new Error('LLM_API_KEY manquante'));
+
+    // Un 500 dirait « bug de l'API » là où la dépendance seule est en cause.
+    await expect(service.draw(SUBJECT, 'classique', 'general')).rejects.toThrow(
+      /Le QG n’arrive pas à préparer cette mission/,
+    );
+  });
+
+  it('laisse passer un refus de droits sans le maquiller en panne', async () => {
+    entitlements.consumeCredit.mockRejectedValue(new ForbiddenException('non'));
+
+    await expect(service.draw(SUBJECT, 'classique', 'general')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('ne rembourse rien quand la partie est servie', async () => {

@@ -1,4 +1,5 @@
 import {
+  HttpException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -84,8 +85,22 @@ export class WordsService {
       return { pair, challenge, credits: spend.credits };
     } catch (error) {
       await this.entitlements.refundCredit(subject, spend.from);
-      throw error;
+      throw this.playerFacing(error);
     }
+  }
+
+  /**
+   * Un échec de génération est une panne de dépendance, pas un bug de l'API :
+   * il doit sortir en 503 et non en 500. Sans cette conversion, une
+   * `LLM_API_KEY` absente ou un gateway en vrac remonteraient au joueur comme
+   * une erreur interne, et le détail technique fuirait dans la réponse.
+   */
+  private playerFacing(error: unknown): unknown {
+    if (error instanceof HttpException) return error;
+    this.logger.error('Tirage impossible', error);
+    return new ServiceUnavailableException(
+      'Le QG n’arrive pas à préparer cette mission. Réessaie dans quelques instants.',
+    );
   }
 
   /* ------------------------------------------------------------------ */
