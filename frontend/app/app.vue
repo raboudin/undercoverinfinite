@@ -12,7 +12,14 @@ const missionExit = useMissionExit()
 
 // La session est résolue une fois pour toutes par ~/plugins/auth.ts ; la coque
 // n'en affiche que le résultat.
-const { label: agentLabel, resolved: sessionResolved, pending: authPending, logout } = useNuxtApp().$auth
+const {
+  label: agentLabel,
+  initial: agentInitial,
+  avatarUrl: agentAvatar,
+  resolved: sessionResolved,
+  pending: authPending,
+  logout
+} = useNuxtApp().$auth
 </script>
 
 <template>
@@ -25,6 +32,8 @@ const { label: agentLabel, resolved: sessionResolved, pending: authPending, logo
         <div class="flex items-center gap-2">
           <AccountButton
             :label="agentLabel"
+            :initial="agentInitial"
+            :avatar-url="agentAvatar"
             :resolved="sessionResolved"
             :pending="authPending"
             @logout="logout()"

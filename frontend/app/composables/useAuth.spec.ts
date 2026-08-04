@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAuth } from './useAuth'
 
-const USER = { id: 'user-1', email: 'agent@undercover.test', displayName: 'Agent 42' }
+const USER = {
+  id: 'user-1',
+  email: 'agent@undercover.test',
+  displayName: 'Agent 42',
+  avatarUpdatedAt: null,
+  hasPassword: true
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -168,5 +174,101 @@ describe('createAuth', () => {
     await auth.fetchSession()
 
     expect(auth.label.value).toBe('agent')
+    expect(auth.initial.value).toBe('A')
+  })
+
+  describe('dossier d’agent', () => {
+    /** Session ouverte, puis une réponse par appel suivant. */
+    async function loggedIn(...responses: Response[]) {
+      const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse({ user: USER }))
+      for (const response of responses) fetchFn.mockResolvedValueOnce(response)
+      const auth = makeAuth(fetchFn as unknown as typeof fetch)
+      await auth.fetchSession()
+      fetchFn.mockClear()
+      return { auth, fetchFn }
+    }
+
+    it('n’expose une URL de photo qu’une fois la photo déposée', async () => {
+      const { auth } = await loggedIn()
+      expect(auth.avatarUrl.value).toBeNull()
+
+      const withPhoto = { ...USER, avatarUpdatedAt: '2026-08-04T10:00:00.000Z' }
+      const { auth: auth2 } = await loggedIn(jsonResponse({ user: withPhoto }))
+      await auth2.setAvatar('data:image/webp;base64,AAAA')
+
+      // Le `?v=` est ce qui rend le cache de l'API sans danger : sans lui, la
+      // photo précédente resterait affichée jusqu'à son expiration.
+      expect(auth2.avatarUrl.value).toBe(
+        'http://api.test/auth/avatar/user-1?v=2026-08-04T10%3A00%3A00.000Z'
+      )
+    })
+
+    it('renomme l’agent et remplace la session', async () => {
+      const renamed = { ...USER, displayName: 'Corbeau' }
+      const { auth, fetchFn } = await loggedIn(jsonResponse({ user: renamed }))
+
+      await expect(auth.updateProfile({ displayName: 'Corbeau' })).resolves.toBe(true)
+
+      expect(fetchFn).toHaveBeenCalledWith('http://api.test/auth/me', expect.anything())
+      expect(initOf(fetchFn).method).toBe('PATCH')
+      expect(auth.label.value).toBe('Corbeau')
+    })
+
+    it('dépose puis retire la photo', async () => {
+      const { auth, fetchFn } = await loggedIn(
+        jsonResponse({ user: { ...USER, avatarUpdatedAt: '2026-08-04T10:00:00.000Z' } }),
+        jsonResponse({ user: USER })
+      )
+
+      await auth.setAvatar('data:image/webp;base64,AAAA')
+      expect(fetchFn.mock.calls[0]?.[0]).toBe('http://api.test/auth/me/avatar')
+      expect(initOf(fetchFn).method).toBe('PUT')
+      expect(JSON.parse(initOf(fetchFn).body as string)).toEqual({
+        data: 'data:image/webp;base64,AAAA'
+      })
+
+      await auth.removeAvatar()
+      expect(initOf(fetchFn, 1).method).toBe('DELETE')
+      expect(auth.avatarUrl.value).toBeNull()
+    })
+
+    it('supprime le compte et retombe sur anonyme', async () => {
+      // 204 sans corps : il n'y a plus de session à lire.
+      const { auth, fetchFn } = await loggedIn(
+        { ok: true, status: 204, json: () => Promise.reject(new Error('sans corps')) } as unknown as Response
+      )
+
+      await expect(auth.deleteAccount('motdepasse-1')).resolves.toBe(true)
+
+      expect(fetchFn).toHaveBeenCalledWith('http://api.test/auth/me', expect.anything())
+      expect(initOf(fetchFn).method).toBe('DELETE')
+      expect(JSON.parse(initOf(fetchFn).body as string)).toEqual({ password: 'motdepasse-1' })
+      expect(auth.user.value).toBeNull()
+      expect(auth.status.value).toBe('anonymous')
+    })
+
+    it('garde la session quand la suppression est refusée', async () => {
+      // 403 et non 401 côté API : la session est valable, c'est le mot de
+      // passe qui ne l'est pas — donc aucune rotation, aucun rejeu.
+      const { auth, fetchFn } = await loggedIn(
+        jsonResponse({ message: 'Mot de passe incorrect.' }, 403)
+      )
+
+      await expect(auth.deleteAccount('à côté')).resolves.toBe(false)
+
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+      expect(auth.error.value).toBe('Mot de passe incorrect.')
+      expect(auth.isAuthenticated.value).toBe(true)
+    })
+
+    it('supprime un compte OAuth sans mot de passe', async () => {
+      const { auth, fetchFn } = await loggedIn(
+        { ok: true, status: 204, json: () => Promise.reject(new Error('sans corps')) } as unknown as Response
+      )
+
+      await auth.deleteAccount()
+
+      expect(JSON.parse(initOf(fetchFn).body as string)).toEqual({})
+    })
   })
 })
