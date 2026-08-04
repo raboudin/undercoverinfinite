@@ -1,224 +1,210 @@
 import {
+  HttpException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import {
+  MODES,
+  THEMES,
+  type ModeId,
+  type ThemeId,
+} from '../entitlements/catalog';
+import {
+  EntitlementsService,
+  type CreditsDto,
+} from '../entitlements/entitlements.service';
+import type { Subject } from '../entitlements/subject';
 import { PrismaService } from '../prisma/prisma.service';
+import { isUniqueViolation } from '../prisma/prisma.errors';
+import { LlmClient, parseJsonArray } from './llm.client';
 
 export interface WordPairDto {
   a: string;
   b: string;
 }
 
-export interface DailyWordsDto {
-  day: string;
-  pairs: WordPairDto[];
+export interface DrawDto {
+  pair: WordPairDto;
+  /** Rempli seulement en mode défi. */
+  challenge: string | null;
+  credits: CreditsDto;
 }
-
-/** Nombre de paires générées chaque jour — le quota gratuit quotidien. */
-export const PAIRS_PER_DAY = 5;
-
-/** Le « jour » du jeu suit ce fuseau, côté cron comme côté clé de lot. */
-export const WORDS_TIMEZONE = 'Europe/Paris';
 
 /**
- * Config LLM entièrement pilotée par l'environnement : `LLM_API_KEY`
- * (obligatoire), `LLM_MODEL` et `LLM_GATEWAY_URL` (optionnels, défauts
- * ci-dessous). Changer de modèle ou de fournisseur OpenAI-compatible ne
- * demande donc aucune modification de code.
+ * Nombre de paires demandées au LLM en une fois. Les mots ne sont plus produits
+ * par un cron quotidien mais quand un tirage n'a plus rien d'inédit à servir ;
+ * générer par petits lots plutôt qu'à l'unité amortit l'appel sur plusieurs
+ * parties, sans jamais anticiper une demande qui n'existe pas.
  */
-export const DEFAULT_GATEWAY_URL =
-  'https://ai-gateway.vercel.sh/v1/chat/completions';
-export const DEFAULT_MODEL = 'google/gemini-3.5-flash-lite';
+const BATCH_SIZE = 8;
 
-/** Lit une variable d'env en traitant vide/espaces comme absente. */
-function envOr(name: string, fallback: string): string {
-  const value = process.env[name]?.trim();
-  return value ? value : fallback;
-}
+/**
+ * Profondeur d'historique consultée pour ne pas resservir un contenu.
+ * Bornée volontairement : sans plafond, la liste d'exclusion d'un gros joueur
+ * finirait par peser plus lourd que le pool lui-même.
+ */
+const RECENT_DRAWS = 300;
 
-/** Fenêtre passée réinjectée dans le prompt pour éviter les redites. */
-const AVOID_REPEATS_DAYS = 14;
+/** Mots réinjectés dans le prompt pour éloigner le lot suivant du précédent. */
+const AVOID_SAMPLE = 60;
 
 @Injectable()
 export class WordsService {
   private readonly logger = new Logger(WordsService.name);
 
   /**
-   * Génération en cours, partagée : deux requêtes simultanées sur un lot
-   * manquant ne doivent déclencher qu'un seul appel LLM.
+   * Générations en cours, une par pool. Deux parties lancées en même temps sur
+   * un pool vide ne doivent déclencher qu'un seul appel LLM ; deux pools
+   * différents doivent pouvoir se remplir en parallèle.
    */
-  private generating: Promise<void> | null = null;
+  private readonly generating = new Map<string, Promise<void>>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly entitlements: EntitlementsService,
+    private readonly llm: LlmClient,
+  ) {}
 
-  /** Date du jour au format YYYY-MM-DD dans le fuseau du jeu. */
-  todayKey(now: Date = new Date()): string {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: WORDS_TIMEZONE,
-    }).format(now);
+  /**
+   * Sert une partie : contrôle des droits, débit du crédit, puis tirage.
+   *
+   * Le crédit est débité **avant** la génération pour que le plafond reste
+   * atomique (voir `consumeCredit`) ; en échange, tout échec en aval est
+   * remboursé — une panne du fournisseur LLM ne doit pas coûter une partie.
+   */
+  async draw(subject: Subject, mode: ModeId, theme: ThemeId): Promise<DrawDto> {
+    await this.entitlements.assertCanPlay(subject, mode, theme);
+
+    const spend = await this.entitlements.consumeCredit(subject);
+    try {
+      const spicy = MODES[mode].spicy === true;
+      const pair = await this.drawPair(subject, theme, spicy);
+      const challenge =
+        mode === 'defi' ? await this.drawChallenge(subject) : null;
+      return { pair, challenge, credits: spend.credits };
+    } catch (error) {
+      await this.entitlements.refundCredit(subject, spend.from);
+      throw this.playerFacing(error);
+    }
   }
 
   /**
-   * Le lot du jour est normalement produit ici, à heure fixe. `getToday`
-   * sait aussi le générer à la demande si le serveur était éteint à ce
-   * moment-là — le cron n'est donc pas un point de défaillance unique.
+   * Un échec de génération est une panne de dépendance, pas un bug de l'API :
+   * il doit sortir en 503 et non en 500. Sans cette conversion, une
+   * `LLM_API_KEY` absente ou un gateway en vrac remonteraient au joueur comme
+   * une erreur interne, et le détail technique fuirait dans la réponse.
    */
-  @Cron('5 0 * * *', { timeZone: WORDS_TIMEZONE })
-  async generateDailyBatch(): Promise<void> {
-    try {
-      await this.ensureBatch(this.todayKey());
-    } catch (error) {
-      this.logger.error('Génération du lot quotidien échouée', error);
-    }
+  private playerFacing(error: unknown): unknown {
+    if (error instanceof HttpException) return error;
+    this.logger.error('Tirage impossible', error);
+    return new ServiceUnavailableException(
+      'Le QG n’arrive pas à préparer cette mission. Réessaie dans quelques instants.',
+    );
   }
 
-  async getToday(): Promise<DailyWordsDto> {
-    const day = this.todayKey();
-    let pairs = await this.findPairs(day);
-    if (pairs.length === 0) {
-      try {
-        await this.ensureBatch(day);
-      } catch (error) {
-        this.logger.error(`Génération à la demande échouée pour ${day}`, error);
-      }
-      pairs = await this.findPairs(day);
+  /* ------------------------------------------------------------------ */
+  /* Paires                                                              */
+  /* ------------------------------------------------------------------ */
+
+  private async drawPair(
+    subject: Subject,
+    theme: ThemeId,
+    spicy: boolean,
+  ): Promise<WordPairDto> {
+    const seen = await this.recentlyDrawn(subject, 'pair');
+    const where = { theme, spicy, id: { notIn: seen } };
+
+    let available = await this.prisma.wordPair.count({ where });
+    if (available === 0) {
+      await this.fillPool(`pair:${theme}:${spicy}`, () =>
+        this.generatePairs(theme, spicy),
+      );
+      available = await this.prisma.wordPair.count({ where });
     }
-    if (pairs.length === 0) {
+    if (available === 0) {
       throw new ServiceUnavailableException(
-        'Les mots du jour ne sont pas disponibles pour le moment. Réessaie dans quelques instants.',
+        'Le QG n’arrive pas à préparer de nouveaux mots. Réessaie dans quelques instants.',
       );
     }
-    return { day, pairs };
+
+    // `skip` aléatoire faute de `ORDER BY random()` en Prisma : deux tables
+    // servies dans la même seconde ne doivent pas recevoir la même paire.
+    const [row] = await this.prisma.wordPair.findMany({
+      where,
+      skip: Math.floor(Math.random() * available),
+      take: 1,
+    });
+    if (!row) {
+      throw new ServiceUnavailableException(
+        'Le QG n’arrive pas à préparer de nouveaux mots. Réessaie dans quelques instants.',
+      );
+    }
+
+    await this.markDrawn(subject, 'pair', row.id);
+    return { a: row.wordA, b: row.wordB };
   }
 
-  private async findPairs(day: string): Promise<WordPairDto[]> {
-    const rows = await this.prisma.dailyWordPair.findMany({
-      where: { day: new Date(day) },
-      orderBy: { position: 'asc' },
-    });
-    return rows.map((row) => ({ a: row.wordA, b: row.wordB }));
-  }
-
-  private ensureBatch(day: string): Promise<void> {
-    this.generating ??= this.generateAndStore(day).finally(() => {
-      this.generating = null;
-    });
-    return this.generating;
-  }
-
-  private async generateAndStore(day: string): Promise<void> {
-    // Revérifié sous le verrou : le lot a pu être créé entre-temps.
-    const existing = await this.prisma.dailyWordPair.count({
-      where: { day: new Date(day) },
-    });
-    if (existing > 0) return;
-
-    const since = new Date(day);
-    since.setUTCDate(since.getUTCDate() - AVOID_REPEATS_DAYS);
-    const recent = await this.prisma.dailyWordPair.findMany({
-      where: { day: { gte: since } },
+  private async generatePairs(theme: ThemeId, spicy: boolean): Promise<void> {
+    const recent = await this.prisma.wordPair.findMany({
+      where: { theme, spicy },
+      orderBy: { createdAt: 'desc' },
+      take: AVOID_SAMPLE,
+      select: { wordA: true, wordB: true },
     });
     const avoid = recent.flatMap((row) => [row.wordA, row.wordB]);
 
-    const pairs = await this.callLlm(avoid);
+    const pairs = this.parsePairs(
+      await this.llm.complete(this.pairPrompt(theme, spicy, avoid)),
+    );
 
-    // skipDuplicates : si deux instances génèrent en parallèle, la contrainte
-    // unique (day, position) fait silencieusement gagner la première.
-    await this.prisma.dailyWordPair.createMany({
-      data: pairs.map((pair, position) => ({
-        day: new Date(day),
-        position,
+    // `skipDuplicates` : deux instances peuvent générer le même mot au même
+    // moment, la contrainte unique fait silencieusement gagner la première.
+    await this.prisma.wordPair.createMany({
+      data: pairs.map((pair) => ({
+        theme,
+        spicy,
         wordA: pair.a,
         wordB: pair.b,
       })),
       skipDuplicates: true,
     });
-    this.logger.log(`Lot de ${pairs.length} paires généré pour ${day}`);
+    this.logger.log(
+      `${pairs.length} paires générées (thème ${theme}${spicy ? ', hot' : ''})`,
+    );
   }
 
-  private async callLlm(avoid: string[]): Promise<WordPairDto[]> {
-    const apiKey = process.env.LLM_API_KEY?.trim();
-    if (!apiKey) {
-      throw new Error('LLM_API_KEY manquante : impossible de générer les mots');
-    }
-    const model = envOr('LLM_MODEL', DEFAULT_MODEL);
-    const gatewayUrl = envOr('LLM_GATEWAY_URL', DEFAULT_GATEWAY_URL);
+  private pairPrompt(theme: ThemeId, spicy: boolean, avoid: string[]): string {
+    const registre = spicy
+      ? 'Registre volontairement osé, pour une soirée entre adultes consentants : ' +
+        'séduction, sorties nocturnes, situations coquines, sous-entendus. ' +
+        'Reste suggestif et bon enfant — rien d’explicite, rien d’illégal, ' +
+        'aucun contenu impliquant des mineurs ou de la violence. ' +
+        `Applique ce registre au cadre suivant. ${THEMES[theme].prompt}`
+      : THEMES[theme].prompt;
 
     const avoidClause =
       avoid.length > 0
-        ? `\nMots déjà utilisés récemment, à ne pas reprendre : ${avoid.join(', ')}.`
+        ? `\nMots déjà utilisés, à ne pas reprendre : ${avoid.join(', ')}.`
         : '';
-    const prompt =
-      `Génère exactement ${PAIRS_PER_DAY} paires de mots français pour le jeu Undercover. ` +
-      'Chaque paire contient deux noms communs proches mais bien distincts ' +
+
+    return (
+      `Génère exactement ${BATCH_SIZE} paires de mots français pour le jeu Undercover. ` +
+      'Chaque paire contient deux termes proches mais bien distincts ' +
       '(ex. « Café » / « Thé », « Passeport » / « Visa ») : assez semblables pour que ' +
       "l'undercover puisse se fondre dans les descriptions, assez différents pour être démasquable. " +
-      'Varie les univers (objets, lieux, nourriture, métiers, nature…).' +
+      registre +
       avoidClause +
       '\nRéponds UNIQUEMENT avec un tableau JSON, sans texte autour, au format : ' +
-      '[{"a":"Mot1","b":"Mot2"}, …]';
-
-    const response = await fetch(gatewayUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 1,
-      }),
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(
-        `Le gateway LLM a répondu ${response.status} : ${detail.slice(0, 500)}`,
-      );
-    }
-    const payload: unknown = await response.json();
-    return this.parsePairs(this.extractContent(payload));
-  }
-
-  /** Extrait `choices[0].message.content` d'une réponse OpenAI-compatible. */
-  private extractContent(payload: unknown): string {
-    if (typeof payload === 'object' && payload !== null) {
-      const choices = (payload as Record<string, unknown>).choices;
-      if (Array.isArray(choices) && choices.length > 0) {
-        const first: unknown = choices[0];
-        if (typeof first === 'object' && first !== null) {
-          const message = (first as Record<string, unknown>).message;
-          if (typeof message === 'object' && message !== null) {
-            const content = (message as Record<string, unknown>).content;
-            if (typeof content === 'string') return content;
-          }
-        }
-      }
-    }
-    throw new Error('Réponse LLM sans contenu exploitable');
+      '[{"a":"Mot1","b":"Mot2"}, …]'
+    );
   }
 
   private parsePairs(content: string): WordPairDto[] {
-    // Les modèles emballent parfois le JSON dans des fences markdown.
-    const stripped = content
-      .trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/, '');
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(stripped);
-    } catch {
-      throw new Error(`Réponse LLM illisible : ${content.slice(0, 200)}`);
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error('Réponse LLM : un tableau JSON était attendu');
-    }
-
     const pairs: WordPairDto[] = [];
     const seen = new Set<string>();
-    for (const item of parsed) {
+
+    for (const item of parseJsonArray(content)) {
       if (typeof item !== 'object' || item === null) continue;
       const { a, b } = item as Record<string, unknown>;
       if (typeof a !== 'string' || typeof b !== 'string') continue;
@@ -235,11 +221,134 @@ export class WordsService {
       pairs.push({ a: wordA, b: wordB });
     }
 
-    if (pairs.length < PAIRS_PER_DAY) {
-      throw new Error(
-        `Réponse LLM : ${pairs.length} paires valides sur ${PAIRS_PER_DAY} attendues`,
+    if (pairs.length === 0) {
+      throw new Error('Réponse LLM : aucune paire exploitable');
+    }
+    return pairs;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Défis                                                               */
+  /* ------------------------------------------------------------------ */
+
+  private async drawChallenge(subject: Subject): Promise<string> {
+    const seen = await this.recentlyDrawn(subject, 'challenge');
+    const where = { id: { notIn: seen } };
+
+    let available = await this.prisma.challenge.count({ where });
+    if (available === 0) {
+      await this.fillPool('challenge', () => this.generateChallenges());
+      available = await this.prisma.challenge.count({ where });
+    }
+    if (available === 0) {
+      throw new ServiceUnavailableException(
+        'Le QG n’arrive pas à préparer de défi. Réessaie dans quelques instants.',
       );
     }
-    return pairs.slice(0, PAIRS_PER_DAY);
+
+    const [row] = await this.prisma.challenge.findMany({
+      where,
+      skip: Math.floor(Math.random() * available),
+      take: 1,
+    });
+    if (!row) {
+      throw new ServiceUnavailableException(
+        'Le QG n’arrive pas à préparer de défi. Réessaie dans quelques instants.',
+      );
+    }
+
+    await this.markDrawn(subject, 'challenge', row.id);
+    return row.text;
+  }
+
+  private async generateChallenges(): Promise<void> {
+    const recent = await this.prisma.challenge.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: AVOID_SAMPLE,
+      select: { text: true },
+    });
+
+    const avoidClause =
+      recent.length > 0
+        ? `\nDéfis déjà écrits, à ne pas répéter : ${recent.map((row) => row.text).join(' / ')}.`
+        : '';
+
+    const prompt =
+      `Génère exactement ${BATCH_SIZE} défis pour une partie du jeu Undercover. ` +
+      'Un défi est une contrainte de parole que TOUS les joueurs tiennent pendant toute la partie, ' +
+      'en plus des règles normales (ex. « Chaque description doit contenir une couleur », ' +
+      '« Interdiction d’utiliser un verbe à l’infinitif », « Parle toujours à la troisième personne »). ' +
+      'Il doit rester vérifiable à l’oreille, tenir en une phrase courte, et ne jamais obliger à révéler son mot.' +
+      avoidClause +
+      '\nRéponds UNIQUEMENT avec un tableau JSON de chaînes, sans texte autour : ["Défi 1", "Défi 2", …]';
+
+    const texts: string[] = [];
+    const seen = new Set<string>();
+    for (const item of parseJsonArray(await this.llm.complete(prompt))) {
+      if (typeof item !== 'string') continue;
+      const text = item.trim();
+      if (!text) continue;
+      const key = text.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      texts.push(text);
+    }
+    if (texts.length === 0) {
+      throw new Error('Réponse LLM : aucun défi exploitable');
+    }
+
+    await this.prisma.challenge.createMany({
+      data: texts.map((text) => ({ text })),
+      skipDuplicates: true,
+    });
+    this.logger.log(`${texts.length} défis générés`);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Pool                                                                */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Remplit un pool en dédupliquant les appels concurrents : dix parties
+   * lancées ensemble sur un thème vide ne doivent produire qu'un seul appel
+   * LLM, pas dix.
+   */
+  private fillPool(key: string, generate: () => Promise<void>): Promise<void> {
+    const inFlight = this.generating.get(key);
+    if (inFlight) return inFlight;
+
+    const started = generate().finally(() => this.generating.delete(key));
+    this.generating.set(key, started);
+    return started;
+  }
+
+  /** Identifiants récemment servis à ce sujet, pour ne pas les resservir. */
+  private async recentlyDrawn(
+    subject: Subject,
+    kind: 'pair' | 'challenge',
+  ): Promise<string[]> {
+    const rows = await this.prisma.contentDraw.findMany({
+      where: { subject: subject.key, kind },
+      orderBy: { drawnAt: 'desc' },
+      take: RECENT_DRAWS,
+      select: { refId: true },
+    });
+    return rows.map((row) => row.refId);
+  }
+
+  private async markDrawn(
+    subject: Subject,
+    kind: 'pair' | 'challenge',
+    refId: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.contentDraw.create({
+        data: { subject: subject.key, kind, refId },
+      });
+    } catch (error) {
+      // Déjà noté (le contenu était sorti de la fenêtre récente) : sans
+      // importance, l'objectif est seulement d'espacer les redites.
+      if (!isUniqueViolation(error)) throw error;
+    }
   }
 }

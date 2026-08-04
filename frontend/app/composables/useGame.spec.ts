@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { createGame, MAX_PLAYERS, maxUndercovers, type Game, type Player } from './useGame'
+import {
+  createGame,
+  DEFAULT_TIMER_SECONDS,
+  MAX_PLAYERS,
+  maxUndercovers,
+  type Game,
+  type GameConfig,
+  type Player
+} from './useGame'
 
 // mulberry32 : un PRNG déterministe, pour que la distribution des rôles soit
 // reproductible d'un run à l'autre.
@@ -15,13 +23,23 @@ function seeded(seed: number) {
 
 const SIX = ['Marion', 'Karim', 'Sami', 'Léa', 'Youssef', 'Nadia']
 
-// Les paires viennent désormais de l'appelant (crédit quotidien de l'API) :
-// les tests en injectent une fixe.
+// Les mots viennent de l'appelant, qui les a obtenus du serveur contre un
+// crédit : les tests en injectent une paire fixe.
 const PAIR = { a: 'Café', b: 'Thé' }
 
 function newGame(names: string[] = SIX, undercoverCount = 1, seed = 42): Game {
   const game = createGame({ rng: seeded(seed) })
-  game.configure({ names, undercoverCount }, PAIR)
+  game.configure({ names, undercoverCount, mode: 'classique' }, { pair: PAIR })
+  return game
+}
+
+/** Partie dans un mode donné, prête à jouer. */
+function gameInMode(config: Partial<GameConfig> & Pick<GameConfig, 'mode'>, challenge?: string): Game {
+  const game = createGame({ rng: seeded(42) })
+  game.configure(
+    { names: SIX, undercoverCount: 1, ...config },
+    { pair: PAIR, challenge }
+  )
   return game
 }
 
@@ -70,7 +88,7 @@ describe('createGame — configuration', () => {
 
   it('passe en phase reveal et efface l’erreur quand la config est valide', () => {
     const game = createGame({ rng: seeded(1) })
-    expect(game.configure({ names: SIX, undercoverCount: 2 }, PAIR)).toBe(true)
+    expect(game.configure({ names: SIX, undercoverCount: 2, mode: 'classique' }, { pair: PAIR })).toBe(true)
     expect(game.phase.value).toBe('reveal')
     expect(game.error.value).toBeNull()
     expect(game.round.value).toBe(0)
@@ -78,34 +96,34 @@ describe('createGame — configuration', () => {
 
   it('refuse moins de 3 agents ou plus que le maximum', () => {
     const game = createGame()
-    expect(game.configure({ names: ['Marion', 'Karim'], undercoverCount: 1 }, PAIR)).toBe(false)
+    expect(game.configure({ names: ['Marion', 'Karim'], undercoverCount: 1, mode: 'classique' }, { pair: PAIR })).toBe(false)
     expect(game.phase.value).toBe('setup')
     expect(game.error.value).toContain('entre 3 et 12')
 
     const tooMany = Array.from({ length: MAX_PLAYERS + 1 }, (_, i) => `Agent ${i}`)
-    expect(game.configure({ names: tooMany, undercoverCount: 1 }, PAIR)).toBe(false)
+    expect(game.configure({ names: tooMany, undercoverCount: 1, mode: 'classique' }, { pair: PAIR })).toBe(false)
     expect(game.phase.value).toBe('setup')
   })
 
   it('refuse un nom de code vide, espaces compris', () => {
     const game = createGame()
-    expect(game.configure({ names: ['Marion', '   ', 'Sami'], undercoverCount: 1 }, PAIR)).toBe(false)
+    expect(game.configure({ names: ['Marion', '   ', 'Sami'], undercoverCount: 1, mode: 'classique' }, { pair: PAIR })).toBe(false)
     expect(game.error.value).toContain('nom de code')
   })
 
   it('refuse les doublons sans tenir compte de la casse', () => {
     const game = createGame()
-    expect(game.configure({ names: ['Marion', 'marion', 'Sami'], undercoverCount: 1 }, PAIR)).toBe(false)
+    expect(game.configure({ names: ['Marion', 'marion', 'Sami'], undercoverCount: 1, mode: 'classique' }, { pair: PAIR })).toBe(false)
     expect(game.error.value).toContain('même nom de code')
   })
 
   it('refuse un nombre d’undercovers hors bornes', () => {
     const game = createGame()
-    expect(game.configure({ names: SIX, undercoverCount: 0 }, PAIR)).toBe(false)
+    expect(game.configure({ names: SIX, undercoverCount: 0, mode: 'classique' }, { pair: PAIR })).toBe(false)
     expect(game.error.value).toContain('entre 1 et 2')
 
     // 6 agents plafonnent à 2 undercovers : à 3 les civils ne seraient plus majoritaires.
-    expect(game.configure({ names: SIX, undercoverCount: 3 }, PAIR)).toBe(false)
+    expect(game.configure({ names: SIX, undercoverCount: 3, mode: 'classique' }, { pair: PAIR })).toBe(false)
     expect(game.phase.value).toBe('setup')
   })
 
@@ -270,13 +288,26 @@ describe('createGame — conditions de victoire', () => {
     expect(game.aliveUndercovers.value).toBe(0)
   })
 
-  it('donne la victoire aux undercovers dès qu’ils atteignent la parité', () => {
-    // 5 agents / 2 undercovers : un civil éliminé suffit à faire 2 contre 2.
+  /** À égalité la partie tient encore : c'est la manche en tête-à-tête. */
+  it('laisse la partie ouverte quand les camps s’égalisent', () => {
+    // 5 agents / 2 undercovers : un civil éliminé fait 2 contre 2.
     const game = newGame(['Marion', 'Karim', 'Sami', 'Léa', 'Youssef'], 2)
     finishReveal(game)
     playRoundAndEliminate(game, 'civil')
 
     expect(game.aliveCivils.value).toBe(2)
+    expect(game.aliveUndercovers.value).toBe(2)
+    expect(game.winner.value).toBeNull()
+    expect(game.phase.value).toBe('describe')
+  })
+
+  it('ne donne la victoire aux undercovers qu’en supériorité', () => {
+    const game = newGame(['Marion', 'Karim', 'Sami', 'Léa', 'Youssef'], 2)
+    finishReveal(game)
+    playRoundAndEliminate(game, 'civil')
+    playRoundAndEliminate(game, 'civil')
+
+    expect(game.aliveCivils.value).toBe(1)
     expect(game.aliveUndercovers.value).toBe(2)
     expect(game.winner.value).toBe('undercovers')
     expect(game.phase.value).toBe('victory')
@@ -310,7 +341,7 @@ describe('createGame — fin de partie', () => {
     expect(game.phase.value).toBe('victory')
 
     const nextPair = { a: 'Avion', b: 'Hélicoptère' }
-    game.replaySameTeam(nextPair)
+    game.replaySameTeam({ pair: nextPair })
 
     expect(game.phase.value).toBe('reveal')
     expect(game.players.value.map(player => player.name)).toEqual(['Marion', 'Karim', 'Sami'])
@@ -338,5 +369,179 @@ describe('createGame — fin de partie', () => {
     expect(game.winner.value).toBeNull()
     expect(game.lastEliminated.value).toBeNull()
     expect(game.error.value).toBeNull()
+  })
+})
+
+describe('createGame — modes de jeu', () => {
+  it('retient le mode choisi', () => {
+    expect(gameInMode({ mode: 'hot' }).mode.value).toBe('hot')
+  })
+
+  describe('chrono', () => {
+    it('signale une partie minutée et retient la durée', () => {
+      const game = gameInMode({ mode: 'chrono', timerSeconds: 45 })
+
+      expect(game.isTimed.value).toBe(true)
+      expect(game.timerSeconds.value).toBe(45)
+    })
+
+    it('retombe sur la durée par défaut si aucune n’est donnée', () => {
+      expect(gameInMode({ mode: 'chrono' }).timerSeconds.value).toBe(DEFAULT_TIMER_SECONDS)
+    })
+
+    it('ne minute pas les autres modes', () => {
+      expect(gameInMode({ mode: 'classique' }).isTimed.value).toBe(false)
+    })
+  })
+
+  describe('défi', () => {
+    it('porte le défi de la partie', () => {
+      const game = gameInMode({ mode: 'defi' }, 'Utilise une couleur')
+
+      expect(game.challenge.value).toBe('Utilise une couleur')
+    })
+
+    it('remplace le défi en rejouant', () => {
+      const game = gameInMode({ mode: 'defi' }, 'Utilise une couleur')
+
+      game.replaySameTeam({ pair: { a: 'Avion', b: 'Train' }, challenge: 'Parle au passé' })
+
+      expect(game.challenge.value).toBe('Parle au passé')
+    })
+
+    it('oublie le défi en repartant de zéro', () => {
+      const game = gameInMode({ mode: 'defi' }, 'Utilise une couleur')
+
+      game.newGame()
+
+      expect(game.challenge.value).toBeNull()
+    })
+  })
+
+  describe('pari risqué', () => {
+    /** Amène la partie jusqu'à la phase de paris. */
+    function upToBets(): Game {
+      const game = gameInMode({ mode: 'pari' })
+      finishReveal(game)
+      finishDescription(game)
+      return game
+    }
+
+    /** Un pari valide pour chaque agent vivant : chacun vise son voisin. */
+    function everyoneBets(game: Game, stake = 5) {
+      const alive = game.alivePlayers.value
+      return alive.map((player, index) => ({
+        playerId: player.id,
+        targetId: alive[(index + 1) % alive.length]!.id,
+        stake
+      }))
+    }
+
+    it('insère la phase de paris entre la description et le vote', () => {
+      expect(upToBets().phase.value).toBe('bets')
+    })
+
+    it('ouvre le vote une fois les mises enregistrées', () => {
+      const game = upToBets()
+
+      expect(game.placeBets(everyoneBets(game))).toBe(true)
+      expect(game.phase.value).toBe('vote')
+      expect(game.bets.value).toHaveLength(SIX.length)
+    })
+
+    it('ne repasse pas par les paris aux manches suivantes', () => {
+      const game = upToBets()
+      game.placeBets(everyoneBets(game))
+      eliminateOne(game, 'civil')
+      expect(game.phase.value).toBe('describe')
+
+      finishDescription(game)
+
+      expect(game.phase.value).toBe('vote')
+    })
+
+    it('refuse une mise sur soi-même', () => {
+      const game = upToBets()
+      const alive = game.alivePlayers.value
+      const bets = everyoneBets(game)
+      bets[0] = { playerId: alive[0]!.id, targetId: alive[0]!.id, stake: 5 }
+
+      expect(game.placeBets(bets)).toBe(false)
+      expect(game.error.value).toContain('soi-même')
+      expect(game.phase.value).toBe('bets')
+    })
+
+    it('refuse une mise négative', () => {
+      const game = upToBets()
+      const bets = everyoneBets(game)
+      bets[0]!.stake = -1
+
+      expect(game.placeBets(bets)).toBe(false)
+      expect(game.error.value).toContain('négative')
+    })
+
+    it('exige que toute la table ait misé', () => {
+      const game = upToBets()
+
+      expect(game.placeBets(everyoneBets(game).slice(1))).toBe(false)
+      expect(game.error.value).toContain('Tout le monde')
+    })
+
+    it('refuse deux mises du même agent', () => {
+      const game = upToBets()
+      const bets = everyoneBets(game)
+      bets[1]!.playerId = bets[0]!.playerId
+
+      expect(game.placeBets(bets)).toBe(false)
+      expect(game.error.value).toContain('qu’une fois')
+    })
+
+    it('ne règle les comptes qu’à la victoire', () => {
+      const game = upToBets()
+      game.placeBets(everyoneBets(game))
+
+      expect(game.settlement.value).toEqual([])
+    })
+
+    it('règle les comptes à la révélation des rôles', () => {
+      const game = upToBets()
+      const undercover = game.players.value.find(player => player.role === 'undercover')!
+      const bets = everyoneBets(game).map(bet => ({ ...bet, targetId: undercover.id }))
+      // Le suspect ne peut pas miser sur lui-même : il vise quelqu'un d'autre.
+      bets.find(bet => bet.playerId === undercover.id)!.targetId
+        = game.alivePlayers.value.find(player => player.id !== undercover.id)!.id
+      game.placeBets(bets)
+
+      game.eliminate(undercover.id)
+      game.resolveElimination()
+      expect(game.phase.value).toBe('victory')
+
+      const settlement = game.settlement.value
+      expect(settlement).toHaveLength(SIX.length)
+      // Cinq civils ont vu juste, l'undercover perd sa mise de 5.
+      expect(settlement.filter(row => row.won)).toHaveLength(SIX.length - 1)
+      expect(settlement.find(row => row.playerId === undercover.id)?.net).toBe(-5)
+      expect(Math.round(settlement.reduce((sum, row) => sum + row.net, 0) * 100)).toBe(0)
+    })
+
+    it('oublie les mises en rejouant', () => {
+      const game = upToBets()
+      game.placeBets(everyoneBets(game))
+
+      game.replaySameTeam({ pair: { a: 'Avion', b: 'Train' } })
+
+      expect(game.bets.value).toEqual([])
+      expect(game.needsBets.value).toBe(true)
+    })
+  })
+
+  it('ne demande pas de paris hors du mode pari', () => {
+    const game = gameInMode({ mode: 'classique' })
+    finishReveal(game)
+
+    finishDescription(game)
+
+    expect(game.phase.value).toBe('vote')
+    expect(game.needsBets.value).toBe(false)
   })
 })

@@ -72,3 +72,57 @@ describe('VictoryScreen', () => {
     expect(wrapper.text()).toContain('reviens demain')
   })
 })
+
+describe('VictoryScreen — règlement des paris', () => {
+  const settlement = [
+    { playerId: 'agent-0', targetId: 'agent-2', stake: 5, won: true, net: 5 },
+    { playerId: 'agent-1', targetId: 'agent-2', stake: 5, won: true, net: 5 },
+    { playerId: 'agent-2', targetId: 'agent-0', stake: 10, won: false, net: -10 }
+  ]
+
+  function withSettlement(rows = settlement) {
+    return mount(VictoryScreen, {
+      props: { winner: 'civils' as const, players, settlement: rows },
+      global
+    })
+  }
+
+  it('ne montre rien hors du mode pari', () => {
+    const wrapper = mount(VictoryScreen, {
+      props: { winner: 'civils' as const, players },
+      global
+    })
+    expect(wrapper.text()).not.toContain('Règlement des paris')
+  })
+
+  it('affiche qui doit quoi, signe compris', () => {
+    const text = withSettlement().text()
+
+    expect(text).toContain('Règlement des paris')
+    expect(text).toContain('+5')
+    expect(text).toContain('-10')
+  })
+
+  it('rappelle sur qui chacun avait misé', () => {
+    expect(withSettlement().text()).toContain('misait 10 sur')
+  })
+
+  it('classe du plus gros gain à la plus grosse perte', () => {
+    const rows = withSettlement().findAll('.font-mono.text-body')
+    expect(rows[0]!.text()).toBe('+5')
+    expect(rows.at(-1)!.text()).toBe('-10')
+  })
+
+  it('signale une partie nulle quand rien ne bouge', () => {
+    const wrapper = withSettlement([
+      { playerId: 'agent-0', targetId: 'agent-1', stake: 5, won: false, net: 0 },
+      { playerId: 'agent-1', targetId: 'agent-0', stake: 5, won: false, net: 0 }
+    ])
+
+    expect(wrapper.text()).toContain('chacun reprend sa mise')
+  })
+
+  it('rappelle que l’app ne tient pas la caisse', () => {
+    expect(withSettlement().text()).toContain('pas la caisse')
+  })
+})

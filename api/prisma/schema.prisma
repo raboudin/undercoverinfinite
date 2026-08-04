@@ -31,6 +31,8 @@ model User {
   updatedAt    DateTime @updatedAt
 
   refreshTokens RefreshToken[]
+  entitlements  Entitlement[]
+  wallet        CreditWallet?
 
   @@map("users")
 }
@@ -54,16 +56,98 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
-// Lot quotidien de paires de mots générées par LLM : `day` est la date (Europe/Paris)
-// du lot, `position` l'index 0..4 de la paire dans le lot. Le côté de la paire
-// attribué aux civils reste tiré au sort côté client, comme avant.
-model DailyWordPair {
+// Pack débloqué, rattaché au compte. Aujourd'hui tous les packs se débloquent
+// gratuitement (`source = "free"`) ; le jour où le paiement arrive, seule la
+// valeur de `source` et le remplissage de `externalRef` (id de transaction)
+// changent — rien du côté lecture, qui ne regarde que `pack`.
+// L'unicité (userId, pack) rend le déblocage idempotent : re-cliquer n'ouvre
+// pas une seconde ligne.
+model Entitlement {
+  id          String   @id @default(cuid())
+  userId      String
+  pack        String
+  source      String   @default("free")
+  externalRef String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pack])
+  @@index([userId])
+  @@map("entitlements")
+}
+
+// Solde de crédits achetés (pack « 20 crédits »), qui ne se réinitialise pas
+// chaque jour. Il n'est entamé qu'une fois le quota quotidien épuisé, sinon
+// une recharge fondrait en même temps que des crédits gratuits.
+// Réservé aux comptes : un solde attaché à un appareil se perdrait au premier
+// vidage de cookies, et se dupliquerait au premier navigateur privé.
+model CreditWallet {
+  userId    String   @id
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("credit_wallets")
+}
+
+// Consommation du jour, par sujet et par date (Europe/Paris). C'est cette
+// table qui fait autorité sur le quota, pas le compteur localStorage du
+// client : celui-ci ne sert plus qu'à afficher un reste sans rappeler l'API.
+// `subject` vaut `user:<id>` pour un compte et `device:<uuid>` pour un
+// visiteur anonyme (cookie `device_id`) — un même identifiant de colonne pour
+// les deux, ce qui évite de dupliquer toute la logique de quota.
+model DailyUsage {
+  id      String   @id @default(cuid())
+  subject String
+  day     DateTime @db.Date
+  used    Int      @default(0)
+
+  @@unique([subject, day])
+  @@map("daily_usage")
+}
+
+// Paires de mots générées par LLM, mutualisées entre tous les joueurs et
+// rangées par thème. Elles ne sont plus produites par un cron quotidien mais à
+// la demande, quand un tirage ne trouve plus de paire inédite pour le
+// demandeur — un appel LLM sert donc plusieurs parties au lieu d'une.
+// `spicy` isole les mots du mode hot : même thème, registre différent.
+model WordPair {
   id        String   @id @default(cuid())
-  day       DateTime @db.Date
-  position  Int
+  theme     String
+  spicy     Boolean  @default(false)
   wordA     String
   wordB     String
   createdAt DateTime @default(now())
 
-  @@unique([day, position])
+  @@unique([theme, spicy, wordA, wordB])
+  @@index([theme, spicy])
+  @@map("word_pairs")
+}
+
+// Défis du mode défi, remplis par le même mécanisme de pool que les paires.
+model Challenge {
+  id        String   @id @default(cuid())
+  text      String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("challenges")
+}
+
+// Ce qu'un sujet a déjà reçu, tous contenus confondus (`kind` = "pair" ou
+// "challenge"). Une seule table générique plutôt qu'une par type : la logique
+// de tirage sans redite est rigoureusement la même des deux côtés.
+// Pas de clé étrangère vers WordPair/Challenge — ces contenus ne sont jamais
+// supprimés, et une contrainte par `kind` n'est de toute façon pas exprimable.
+model ContentDraw {
+  id      String   @id @default(cuid())
+  subject String
+  kind    String
+  refId   String
+  drawnAt DateTime @default(now())
+
+  @@unique([subject, kind, refId])
+  @@index([subject, kind])
+  @@map("content_draws")
 }

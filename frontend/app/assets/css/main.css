@@ -98,3 +98,88 @@ body {
   background-image: radial-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px);
   background-size: 3px 3px;
 }
+
+/* Feutre de la table : un dégradé radial suffit à creuser le centre. */
+.table-felt {
+  background:
+    radial-gradient(ellipse at 50% 42%, var(--color-ink-3) 0%, var(--color-ink-1) 72%, var(--color-ink-0) 100%);
+}
+
+/* Retournement des cartes (distribution, élimination). Deux faces empilées, la
+   scène porte la perspective : sans elle la rotation reste plate. */
+.flip-scene {
+  perspective: 900px;
+}
+
+.flip-card {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform .5s cubic-bezier(.2, .7, .3, 1);
+}
+
+.flip-card--up {
+  transform: rotateY(180deg);
+}
+
+.flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+}
+
+.flip-face--back {
+  transform: rotateY(180deg);
+}
+
+/* Dos de carte : guilloché croisé sous un halo froid. */
+.card-back {
+  background-color: var(--color-ink-2);
+  background-image:
+    repeating-linear-gradient(45deg, rgba(90, 110, 145, .10) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-45deg, rgba(90, 110, 145, .07) 0 1px, transparent 1px 7px),
+    radial-gradient(circle at 50% 44%, rgba(74, 111, 165, .18), transparent 62%);
+}
+
+/* Face révélée : le dossier ouvert sous la lampe. */
+.card-face {
+  background-color: var(--color-ink-3);
+  background-image:
+    radial-gradient(circle at 50% 32%, rgba(214, 40, 57, .16), transparent 66%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .028) 0 1px, transparent 1px 4px);
+}
+
+/* Le moment où une carte se retourne. L'animation porte sur `scale`, propriété
+   indépendante : elle se compose avec le `translate` du siège au lieu de
+   l'écraser, et elle laisse `transform` au retournement 3D. */
+.seat-reveal {
+  animation: seat-reveal .6s cubic-bezier(.2, .7, .3, 1);
+}
+
+.seat-reveal .flip-card {
+  animation: seat-reveal-glow .9s ease-out;
+}
+
+@keyframes seat-reveal {
+  0% { scale: 1; }
+  42% { scale: 1.13; }
+  100% { scale: 1; }
+}
+
+@keyframes seat-reveal-glow {
+  0% { box-shadow: 0 0 0 0 rgba(127, 160, 201, 0); }
+  35% { box-shadow: 0 0 22px 3px rgba(127, 160, 201, .5); }
+  100% { box-shadow: 0 0 0 0 rgba(127, 160, 201, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-card {
+    transition: none;
+  }
+
+  .seat-reveal,
+  .seat-reveal .flip-card {
+    animation: none;
+  }
+}
