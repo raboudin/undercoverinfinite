@@ -41,7 +41,20 @@ export interface ModeDefinition {
 export interface ThemeDefinition {
   id: ThemeId
   label: string
+  /** Accroche de vitrine, servie par le catalogue — le front n'en invente pas. */
+  tagline: string
   generalist: boolean
+}
+
+/** Mode du catalogue, enrichi de l'état de déblocage du demandeur. */
+export interface ModeCard extends ModeDefinition {
+  unlocked: boolean
+  /** Jouable = débloqué **et** implémenté. */
+  playable: boolean
+}
+
+export interface ThemeCard extends ThemeDefinition {
+  unlocked: boolean
 }
 
 export interface PackDefinition {
@@ -108,16 +121,15 @@ export function createEntitlements(options: {
   const canPlay = computed(() => ready.value && credits.value.remaining > 0)
 
   /** Modes du catalogue enrichis de leur état de déblocage, ordre serveur. */
-  const modeCards = computed(() =>
+  const modeCards = computed<ModeCard[]>(() =>
     (catalog.value?.modes ?? []).map(mode => ({
       ...mode,
       unlocked: modes.value.includes(mode.id),
-      /** Jouable = débloqué **et** implémenté. */
       playable: modes.value.includes(mode.id) && mode.available
     }))
   )
 
-  const themeCards = computed(() =>
+  const themeCards = computed<ThemeCard[]>(() =>
     (catalog.value?.themes ?? []).map(theme => ({
       ...theme,
       unlocked: themes.value.includes(theme.id)

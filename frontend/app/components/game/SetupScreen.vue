@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Minus, Plus } from '@lucide/vue'
+import { ChevronLeft, Minus, Plus } from '@lucide/vue'
 import {
   DEFAULT_TIMER_SECONDS,
   MAX_PLAYERS,
@@ -14,12 +14,13 @@ import {
 import type {
   Credits,
   EntitlementsStatus,
+  ModeCard,
   ModeId,
+  ThemeCard,
   ThemeId
 } from '../../composables/useEntitlements'
 import type { WordsErrorKind } from '../../composables/useWords'
-import type { ModeChoice } from './ModeSelector.vue'
-import type { ThemeChoice } from './ThemeSelector.vue'
+import type { TableSeat } from './GameTable.vue'
 import logoFull from '../../assets/images/logo-full.png'
 
 export interface SetupSubmission {
@@ -32,8 +33,8 @@ export interface SetupSubmission {
 const props = withDefaults(defineProps<{
   error?: string | null
   /** Modes proposés, hors DIY qui n'est pas un mode mais une source de mots. */
-  modes?: ModeChoice[]
-  themes?: ThemeChoice[]
+  modes?: ModeCard[]
+  themes?: ThemeCard[]
   /** DIY débloqué (pack infinite). */
   diyUnlocked?: boolean
   status?: EntitlementsStatus
@@ -60,7 +61,16 @@ const emit = defineEmits<{
   boutique: []
 }>()
 
+/**
+ * Deux temps. Le menu ne montre que les modes et le dossier thématique — c'est
+ * la seule décision à prendre avant de sortir le téléphone du sac. La table
+ * vient ensuite : elle réunit tout ce qui dépend des joueurs présents.
+ */
+const step = ref<'menu' | 'table'>('menu')
+
 const names = ref<string[]>(['', '', '', ''])
+/** Siège en cours d'édition : la table entière n'a qu'un champ de saisie. */
+const activeSeat = ref(0)
 const undercoverCount = ref(1)
 const mode = ref<ModeId>('classique')
 const theme = ref<ThemeId>('general')
@@ -68,22 +78,45 @@ const timerSeconds = ref(DEFAULT_TIMER_SECONDS)
 const useCustomWords = ref(false)
 const customA = ref('')
 const customB = ref('')
+const themesOpen = ref(false)
 
 const undercoverCeiling = computed(() => maxUndercovers(names.value.length))
 const civilCount = computed(() => names.value.length - undercoverCount.value)
 
+const currentMode = computed(() => props.modes.find(item => item.id === mode.value) ?? null)
 const isTimed = computed(() => mode.value === 'chrono')
-const isSpicy = computed(() => props.modes.find(item => item.id === mode.value)?.spicy === true)
+const isSpicy = computed(() => currentMode.value?.spicy === true)
+
+/**
+ * Le mode hot impose son propre registre de mots : lui proposer un dossier
+ * thématique laisserait croire à un réglage qui n'a aucune prise.
+ */
+const themePicker = computed(() => !isSpicy.value)
+const currentTheme = computed(() => props.themes.find(item => item.id === theme.value) ?? null)
+const submittedTheme = computed<ThemeId>(() => (isSpicy.value ? 'general' : theme.value))
+
+const seats = computed<TableSeat[]>(() =>
+  names.value.map((name, index) => ({
+    id: `seat-${index}`,
+    name: name.trim(),
+    state: name.trim().length > 0 ? 'idle' : 'empty'
+  }))
+)
 
 // Réduire l'effectif peut rendre le nombre d'undercovers illégal : on le
 // ramène sous le plafond plutôt que de laisser passer une config invalide.
-watch(undercoverCeiling, ceiling => {
+watch(undercoverCeiling, (ceiling) => {
   if (undercoverCount.value > ceiling) undercoverCount.value = ceiling
+})
+
+// Retirer des sièges peut laisser l'édition pointer dans le vide.
+watch(() => names.value.length, (count) => {
+  if (activeSeat.value >= count) activeSeat.value = count - 1
 })
 
 // Perdre le pack (déconnexion) doit refermer la saisie manuelle, sinon
 // l'écran promettrait une option que le joueur n'a plus.
-watch(() => props.diyUnlocked, unlocked => {
+watch(() => props.diyUnlocked, (unlocked) => {
   if (!unlocked) useCustomWords.value = false
 })
 
@@ -111,6 +144,8 @@ function setPlayerCount(count: number) {
   if (count < MIN_PLAYERS || count > MAX_PLAYERS) return
   if (count > names.value.length) {
     names.value = [...names.value, ...Array.from({ length: count - names.value.length }, () => '')]
+    // Ajouter un siège, c'est vouloir y écrire un nom tout de suite.
+    activeSeat.value = names.value.length - 1
   }
   else {
     names.value = names.value.slice(0, count)
@@ -127,6 +162,22 @@ function setTimer(seconds: number) {
   timerSeconds.value = seconds
 }
 
+function selectSeat(id: string) {
+  const index = seats.value.findIndex(seat => seat.id === id)
+  if (index >= 0) activeSeat.value = index
+}
+
+/** Enchaîner les noms sans lever les yeux : le tour de table se fait au clavier. */
+function nextSeat() {
+  activeSeat.value = (activeSeat.value + 1) % names.value.length
+}
+
+/** Un dossier scellé referme la vitrine et bascule sur la boutique. */
+function onThemeLocked() {
+  themesOpen.value = false
+  emit('boutique')
+}
+
 function start() {
   emit('start', {
     config: {
@@ -135,7 +186,7 @@ function start() {
       mode: mode.value,
       timerSeconds: timerSeconds.value
     },
-    theme: theme.value,
+    theme: submittedTheme.value,
     custom: useCustomWords.value
       ? { a: customA.value.trim(), b: customB.value.trim() }
       : null
@@ -143,12 +194,12 @@ function start() {
 }
 
 const inputClass
-  = 'w-full rounded-sm border border-subtle bg-surface-inset px-3 py-2.5 text-body text-primary '
+  = 'w-full rounded-sm border border-subtle bg-surface-inset px-3 py-2.5 text-[16px] text-primary '
     + 'placeholder:text-tertiary focus:border-strong focus:outline-none focus:ring-1 focus:ring-focus-ring'
 </script>
 
 <template>
-  <div class="flex flex-col gap-7">
+  <div v-if="step === 'menu'" class="flex flex-col gap-6">
     <div class="flex flex-col items-center gap-3">
       <img :src="logoFull" alt="Undercover Infinite" class="w-64 max-w-full object-contain" >
       <p class="text-center text-body-s text-tertiary">
@@ -159,96 +210,134 @@ const inputClass
 
     <ModeSelector v-model="mode" :modes="modes" @locked="emit('boutique')" />
 
+    <Toast v-if="isSpicy" tone="danger">
+      Mode hot : mots réservés à un public adulte.
+    </Toast>
+
+    <ThemeButton
+      v-if="themePicker"
+      :theme="currentTheme"
+      :disabled="themes.length === 0"
+      @open="themesOpen = true"
+    />
+
+    <p v-if="status === 'ready' && credits" class="text-center font-mono text-caption text-tertiary">
+      Missions restantes aujourd'hui : {{ credits.remaining }}
+    </p>
+
+    <Button size="l" class="w-full" @click="step = 'table'">
+      Dresser la table
+    </Button>
+
+    <ThemeCarousel
+      v-model="theme"
+      :open="themesOpen"
+      :themes="themes"
+      @close="themesOpen = false"
+      @locked="onThemeLocked"
+    />
+  </div>
+
+  <div v-else class="flex flex-col gap-5">
+    <div class="flex items-center gap-3">
+      <IconButton :size="36" aria-label="Revenir au choix du mode" @click="step = 'menu'">
+        <ChevronLeft :size="16" />
+      </IconButton>
+      <div class="min-w-0">
+        <div class="truncate font-display text-body-s uppercase tracking-caps text-primary">
+          {{ currentMode?.label ?? 'Classique' }}
+        </div>
+        <div class="truncate font-mono text-caption text-tertiary">
+          <template v-if="themePicker">{{ currentTheme?.label ?? 'Tous horizons' }}</template>
+          <template v-else>Registre osé</template>
+        </div>
+      </div>
+    </div>
+
+    <GameTable
+      :seats="seats"
+      selectable
+      :selected-id="seats[activeSeat]?.id ?? null"
+      action-label="Renommer"
+      @select="selectSeat"
+    >
+      <div class="font-display text-display-s uppercase tracking-caps text-primary">
+        {{ names.length }}
+      </div>
+      <div class="font-mono text-caption uppercase tracking-caps text-tertiary">
+        agents attablés
+      </div>
+      <div class="mt-1 font-mono text-caption text-red-4">
+        {{ undercoverCount }} infiltré{{ undercoverCount > 1 ? 's' : '' }}
+      </div>
+    </GameTable>
+
+    <Card class="flex flex-col gap-4">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Noms de code</div>
+          <div class="mt-0.5 font-mono text-caption text-tertiary">
+            Touche un siège, écris le nom — de {{ MIN_PLAYERS }} à {{ MAX_PLAYERS }} agents.
+          </div>
+        </div>
+        <div class="flex shrink-0 items-center gap-2">
+          <IconButton :size="34" aria-label="Retirer un agent" @click="setPlayerCount(names.length - 1)">
+            <Minus :size="15" />
+          </IconButton>
+          <IconButton :size="34" aria-label="Ajouter un agent" @click="setPlayerCount(names.length + 1)">
+            <Plus :size="15" />
+          </IconButton>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2.5">
+        <span class="w-7 shrink-0 text-center font-mono text-caption text-tertiary">
+          {{ String(activeSeat + 1).padStart(2, '0') }}
+        </span>
+        <input
+          v-model="names[activeSeat]"
+          :class="inputClass"
+          :placeholder="`Agent ${activeSeat + 1}`"
+          type="text"
+          maxlength="16"
+          autocomplete="off"
+          @keydown.enter.prevent="nextSeat()"
+        >
+        <Button size="s" variant="ghost" class="shrink-0" @click="nextSeat()">Siège suivant</Button>
+      </div>
+    </Card>
+
+    <Card class="flex items-center justify-between gap-4">
+      <div>
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Undercovers infiltrés</div>
+        <div class="mt-0.5 font-mono text-caption text-tertiary">
+          {{ civilCount }} {{ civilCount > 1 ? 'loyaux' : 'loyal' }} · {{ undercoverCount }} infiltré{{ undercoverCount > 1 ? 's' : '' }}
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <IconButton :size="34" aria-label="Retirer un undercover" @click="setUndercoverCount(undercoverCount - 1)">
+          <Minus :size="15" />
+        </IconButton>
+        <span class="w-6 text-center font-display text-display-s text-red-4">{{ undercoverCount }}</span>
+        <IconButton :size="34" aria-label="Ajouter un undercover" @click="setUndercoverCount(undercoverCount + 1)">
+          <Plus :size="15" />
+        </IconButton>
+      </div>
+    </Card>
+
     <Card v-if="isTimed" class="flex items-center justify-between gap-4">
       <div>
         <div class="font-display text-body-s uppercase tracking-caps text-secondary">Temps de parole</div>
         <div class="mt-0.5 font-mono text-caption text-tertiary">par agent et par manche</div>
       </div>
       <div class="flex items-center gap-3">
-        <IconButton :size="36" aria-label="Réduire le temps de parole" @click="setTimer(timerSeconds - 5)">
-          <Minus :size="16" />
+        <IconButton :size="34" aria-label="Réduire le temps de parole" @click="setTimer(timerSeconds - 5)">
+          <Minus :size="15" />
         </IconButton>
         <span class="w-12 text-center font-display text-display-s text-primary">{{ timerSeconds }}s</span>
-        <IconButton :size="36" aria-label="Augmenter le temps de parole" @click="setTimer(timerSeconds + 5)">
-          <Plus :size="16" />
+        <IconButton :size="34" aria-label="Augmenter le temps de parole" @click="setTimer(timerSeconds + 5)">
+          <Plus :size="15" />
         </IconButton>
-      </div>
-    </Card>
-
-    <Toast v-if="isSpicy" tone="danger">
-      Mode hot : mots réservés à un public adulte.
-    </Toast>
-
-    <ThemeSelector v-model="theme" :themes="themes" @locked="emit('boutique')" />
-
-    <Card class="flex flex-col gap-5">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Agents sur le terrain</div>
-          <div class="mt-0.5 font-mono text-caption text-tertiary">de {{ MIN_PLAYERS }} à {{ MAX_PLAYERS }}</div>
-        </div>
-        <div class="flex items-center gap-3">
-          <IconButton
-            :size="36"
-            aria-label="Retirer un agent"
-            @click="setPlayerCount(names.length - 1)"
-          >
-            <Minus :size="16" />
-          </IconButton>
-          <span class="w-7 text-center font-display text-display-s text-primary">{{ names.length }}</span>
-          <IconButton
-            :size="36"
-            aria-label="Ajouter un agent"
-            @click="setPlayerCount(names.length + 1)"
-          >
-            <Plus :size="16" />
-          </IconButton>
-        </div>
-      </div>
-
-      <div class="h-px bg-subtle" />
-
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Undercovers infiltrés</div>
-          <div class="mt-0.5 font-mono text-caption text-tertiary">
-            {{ civilCount }} {{ civilCount > 1 ? 'loyaux' : 'loyal' }} · {{ undercoverCount }} infiltré{{ undercoverCount > 1 ? 's' : '' }}
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <IconButton
-            :size="36"
-            aria-label="Retirer un undercover"
-            @click="setUndercoverCount(undercoverCount - 1)"
-          >
-            <Minus :size="16" />
-          </IconButton>
-          <span class="w-7 text-center font-display text-display-s text-red-4">{{ undercoverCount }}</span>
-          <IconButton
-            :size="36"
-            aria-label="Ajouter un undercover"
-            @click="setUndercoverCount(undercoverCount + 1)"
-          >
-            <Plus :size="16" />
-          </IconButton>
-        </div>
-      </div>
-    </Card>
-
-    <Card class="flex flex-col gap-3">
-      <div class="font-display text-body-s uppercase tracking-caps text-secondary">Noms de code</div>
-      <div class="flex flex-col gap-2.5">
-        <label v-for="(_, index) in names" :key="index" class="flex items-center gap-3">
-          <span class="w-6 shrink-0 font-mono text-caption text-tertiary">{{ String(index + 1).padStart(2, '0') }}</span>
-          <input
-            v-model="names[index]"
-            :class="inputClass"
-            :placeholder="`Agent ${index + 1}`"
-            type="text"
-            maxlength="16"
-            autocomplete="off"
-          >
-        </label>
       </div>
     </Card>
 
@@ -333,12 +422,7 @@ const inputClass
       </Button>
     </template>
 
-    <Button
-      size="l"
-      class="w-full"
-      :disabled="!canLaunch"
-      @click="start()"
-    >
+    <Button size="l" class="w-full" :disabled="!canLaunch" @click="start()">
       {{ drawing ? 'Contact du QG…' : 'Lancer la mission' }}
     </Button>
   </div>

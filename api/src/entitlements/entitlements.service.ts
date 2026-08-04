@@ -50,6 +50,7 @@ export interface EntitlementsDto {
 export interface PublicThemeDto {
   id: ThemeId;
   label: string;
+  tagline: string;
   generalist: boolean;
 }
 
@@ -92,6 +93,7 @@ export class EntitlementsService {
       themes: THEME_IDS.map((id) => ({
         id,
         label: THEMES[id].label,
+        tagline: THEMES[id].tagline,
         generalist: THEMES[id].generalist,
       })),
       freeDailyCredits: resolveAccess({ hasAccount: false, packs: [] })

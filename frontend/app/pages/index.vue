@@ -137,9 +137,8 @@ async function replay() {
 
   <RevealScreen
     v-else-if="phase === 'reveal' && currentRevealPlayer"
-    :player="currentRevealPlayer"
+    :players="players"
     :index="revealIndex"
-    :total="players.length"
     :is-last="isLastReveal"
     @next="nextReveal"
   />
@@ -148,6 +147,7 @@ async function replay() {
     v-else-if="phase === 'describe' && currentSpeaker"
     :round="round"
     :speaker="currentSpeaker"
+    :players="players"
     :order="speakingOrder"
     :speaker-index="speakerIndex"
     :timed="isTimed"
@@ -166,13 +166,14 @@ async function replay() {
   <VoteScreen
     v-else-if="phase === 'vote'"
     :round="round"
-    :candidates="alivePlayers"
+    :players="players"
     @eliminate="eliminate"
   />
 
   <EliminationScreen
     v-else-if="phase === 'elimination' && lastEliminated"
     :player="lastEliminated"
+    :players="players"
     @next="resolveElimination"
   />
 

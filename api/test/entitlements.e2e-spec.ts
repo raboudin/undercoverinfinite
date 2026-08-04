@@ -67,8 +67,12 @@ describe('Entitlements (e2e)', () => {
     // Le compte est créé ici : il repart avec, entitlements et usage compris
     // (cascade sur `users`). La base de dev ne doit rien garder du test.
     if (userId) {
-      await prisma.dailyUsage.deleteMany({ where: { subject: `user:${userId}` } });
-      await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
+      await prisma.dailyUsage.deleteMany({
+        where: { subject: `user:${userId}` },
+      });
+      await prisma.user
+        .delete({ where: { id: userId } })
+        .catch(() => undefined);
     }
     await app.close();
   });
@@ -77,7 +81,11 @@ describe('Entitlements (e2e)', () => {
     it('sert le catalogue à tout le monde', async () => {
       const res = await request(app.getHttpServer()).get('/packs').expect(200);
 
-      const body = res.body as { packs: { id: string }[]; modes: unknown[] };
+      const body = res.body as {
+        packs: { id: string }[];
+        modes: unknown[];
+        themes: { id: string; tagline: string; prompt?: string }[];
+      };
       expect(body.packs.map((pack) => pack.id)).toEqual([
         'credits20',
         'unlimited',
@@ -85,7 +93,13 @@ describe('Entitlements (e2e)', () => {
         'diamond',
         'infinite',
       ]);
+      // La vitrine plein écran affiche un thème par page : elle a besoin d'une
+      // accroche, que seul le serveur connaît.
+      expect(body.themes.every((theme) => theme.tagline.length > 0)).toBe(true);
       // Le prompt de chaque thème est un détail serveur : il ne sort jamais.
+      expect(body.themes.every((theme) => theme.prompt === undefined)).toBe(
+        true,
+      );
       expect(JSON.stringify(res.body)).not.toContain('Registre');
     });
 
@@ -110,7 +124,12 @@ describe('Entitlements (e2e)', () => {
       const body = res.body as EntitlementsBody;
       expect(body.account).toBe(false);
       expect(body.modes).toEqual(['classique']);
-      expect(body.themes).toEqual(['general', 'culture', 'nature', 'technologie']);
+      expect(body.themes).toEqual([
+        'general',
+        'culture',
+        'nature',
+        'technologie',
+      ]);
       expect(body.credits.dailyLimit).toBe(5);
     });
 

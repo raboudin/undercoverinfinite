@@ -25,6 +25,11 @@ describe('LlmClient', () => {
     fetchMock = jest.fn().mockResolvedValue(gatewayResponse('["ok"]'));
     global.fetch = fetchMock;
     process.env.LLM_API_KEY = 'test-key';
+    // `setupFiles: dotenv/config` charge le vrai `api/.env` : sans ce ménage
+    // en amont, le cas « valeurs par défaut » testerait la configuration du
+    // poste du développeur.
+    delete process.env.LLM_MODEL;
+    delete process.env.LLM_GATEWAY_URL;
   });
 
   afterEach(() => {
