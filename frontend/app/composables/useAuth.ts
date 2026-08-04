@@ -4,6 +4,12 @@ export interface AuthUser {
   id: string
   email: string
   displayName: string | null
+  /**
+   * Date du dernier dépôt de photo, `null` s'il n'y en a pas. L'image se
+   * récupère à part (`avatarUrl`) : c'est cet horodatage qui sert de
+   * cache-buster à son URL.
+   */
+  avatarUpdatedAt: string | null
 }
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous'
@@ -60,6 +66,22 @@ export function createAuth(options: { apiBase: string, fetchFn?: typeof fetch })
   const label = computed(() => {
     if (!user.value) return null
     return user.value.displayName || user.value.email.split('@')[0]
+  })
+
+  /** Initiale de repli, affichée tant qu'il n'y a pas de photo. */
+  const initial = computed(() => label.value?.trim().charAt(0).toUpperCase() || null)
+
+  /**
+   * URL de la photo de profil, `null` s'il n'y en a pas.
+   *
+   * Le `?v=` porte la date du dernier dépôt : l'API peut donc laisser le
+   * navigateur mettre l'image en cache franchement, sans qu'un changement de
+   * photo reste invisible.
+   */
+  const avatarUrl = computed(() => {
+    const current = user.value
+    if (!current?.avatarUpdatedAt) return null
+    return `${options.apiBase}/auth/avatar/${current.id}?v=${encodeURIComponent(current.avatarUpdatedAt)}`
   })
 
   /**
@@ -143,11 +165,16 @@ export function createAuth(options: { apiBase: string, fetchFn?: typeof fetch })
     }
   }
 
-  async function submit(path: string, body: Credentials | Registration): Promise<boolean> {
+  /**
+   * Appel qui rend une session (`{ user }`) : connexion, inscription, mais
+   * aussi toute modification du dossier. Le résultat remplace l'utilisateur
+   * courant, ce qui suffit à rafraîchir nom et photo partout dans l'app.
+   */
+  async function sessionCall(run: () => Promise<Response>): Promise<boolean> {
     pending.value = true
     error.value = null
     try {
-      const response = await request(path, { method: 'POST', body: JSON.stringify(body) })
+      const response = await run()
       if (!response.ok) {
         error.value = await messageOf(response)
         return false
@@ -165,12 +192,73 @@ export function createAuth(options: { apiBase: string, fetchFn?: typeof fetch })
     }
   }
 
+  /**
+   * Connexion/inscription : `request` et non `authFetch`. Un 401 y est une
+   * réponse normale (mauvais identifiants), pas un token périmé — tenter une
+   * rotation puis rejouer ne ferait qu'envoyer deux fois le mot de passe.
+   */
+  function submit(path: string, body: Credentials | Registration): Promise<boolean> {
+    return sessionCall(() => request(path, { method: 'POST', body: JSON.stringify(body) }))
+  }
+
   function login(credentials: Credentials): Promise<boolean> {
     return submit('/auth/login', credentials)
   }
 
   function register(registration: Registration): Promise<boolean> {
     return submit('/auth/register', registration)
+  }
+
+  /** Change le nom de code. Une chaîne vide l'efface, côté API comme ici. */
+  function updateProfile(patch: { displayName: string }): Promise<boolean> {
+    return sessionCall(() => authFetch('/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    }))
+  }
+
+  /** Dépose la vignette produite par `toAvatarDataUrl`. */
+  function setAvatar(dataUrl: string): Promise<boolean> {
+    return sessionCall(() => authFetch('/auth/me/avatar', {
+      method: 'PUT',
+      body: JSON.stringify({ data: dataUrl })
+    }))
+  }
+
+  function removeAvatar(): Promise<boolean> {
+    return sessionCall(() => authFetch('/auth/me/avatar', { method: 'DELETE' }))
+  }
+
+  /**
+   * Suppression du compte (RGPD). Irréversible, et sans réponse à lire : le
+   * dossier n'existe plus, on retombe donc directement sur « anonyme ».
+   *
+   * Le mot de passe est réclamé par l'API dès que le compte en a un ; un compte
+   * ouvert via Google n'en a pas et se supprime sur la seule session.
+   */
+  async function deleteAccount(password?: string): Promise<boolean> {
+    pending.value = true
+    error.value = null
+    try {
+      const response = await authFetch('/auth/me', {
+        method: 'DELETE',
+        body: JSON.stringify(password ? { password } : {})
+      })
+      if (!response.ok) {
+        error.value = await messageOf(response)
+        return false
+      }
+      user.value = null
+      status.value = 'anonymous'
+      return true
+    }
+    catch {
+      error.value = GENERIC_ERROR
+      return false
+    }
+    finally {
+      pending.value = false
+    }
   }
 
   /**
@@ -207,6 +295,8 @@ export function createAuth(options: { apiBase: string, fetchFn?: typeof fetch })
     isAuthenticated,
     resolved,
     label,
+    initial,
+    avatarUrl,
     googleUrl,
     authFetch,
     fetchSession,
@@ -214,6 +304,10 @@ export function createAuth(options: { apiBase: string, fetchFn?: typeof fetch })
     login,
     register,
     logout,
+    updateProfile,
+    setAvatar,
+    removeAvatar,
+    deleteAccount,
     clearError
   }
 }

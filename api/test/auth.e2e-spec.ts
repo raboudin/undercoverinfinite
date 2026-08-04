@@ -16,6 +16,12 @@ import { PrismaService } from './../src/prisma/prisma.service';
 const EMAIL = `e2e-${Date.now()}@undercover.test`;
 const PASSWORD = 'motdepasse-e2e-solide';
 
+/** PNG minimal : en-tête magique, suivi de deux octets quelconques. */
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01,
+]);
+const PNG_DATA_URL = `data:image/png;base64,${PNG_BYTES.toString('base64')}`;
+
 /** En-têtes `Set-Cookie` bruts d'une réponse. */
 function setCookieHeaders(res: request.Response): string[] {
   const headers = res.headers as Record<string, string | string[] | undefined>;
@@ -105,7 +111,13 @@ describe('Auth (e2e)', () => {
     // Aucun token dans le corps : uniquement l'utilisateur.
     const body = res.body as Record<string, unknown>;
     expect(body).toEqual({
-      user: { id: ANY_STRING, email: EMAIL, displayName: 'Agent e2e' },
+      user: {
+        id: ANY_STRING,
+        email: EMAIL,
+        displayName: 'Agent e2e',
+        avatarUpdatedAt: null,
+        hasPassword: true,
+      },
     });
     expect(JSON.stringify(body)).not.toContain(
       cookieValue(res, 'access_token'),
@@ -142,6 +154,78 @@ describe('Auth (e2e)', () => {
       .get('/auth/me')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(401);
+  });
+
+  it('change le nom de code et le rend sur la session', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/auth/me')
+      .set('Cookie', cookieHeader(accessToken, refreshToken))
+      .send({ displayName: '  Corbeau  ' })
+      .expect(200);
+
+    expect((res.body as { user: { displayName: string } }).user.displayName)
+      // Espaces retirés au passage.
+      .toBe('Corbeau');
+
+    const me = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Cookie', cookieHeader(accessToken, refreshToken))
+      .expect(200);
+    expect(
+      (me.body as { user: { displayName: string } }).user.displayName,
+    ).toBe('Corbeau');
+  });
+
+  it('refuse de modifier le dossier sans session', async () => {
+    await request(app.getHttpServer())
+      .patch('/auth/me')
+      .send({ displayName: 'Intrus' })
+      .expect(401);
+  });
+
+  it('dépose une photo de profil, la sert, puis la retire', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/auth/me/avatar')
+      .set('Cookie', cookieHeader(accessToken, refreshToken))
+      .send({ data: PNG_DATA_URL })
+      .expect(200);
+
+    const { user } = res.body as {
+      user: { id: string; avatarUpdatedAt: string };
+    };
+    // C'est cet horodatage que le front colle en `?v=` sur l'URL de la photo.
+    expect(user.avatarUpdatedAt).toEqual(ANY_STRING);
+
+    // La photo se lit sans session : c'est une image dans un `<img>`.
+    const image = await request(app.getHttpServer())
+      .get(`/auth/avatar/${user.id}`)
+      .expect(200);
+    expect(image.headers['content-type']).toContain('image/png');
+    expect(image.headers['x-content-type-options']).toBe('nosniff');
+    expect(Buffer.from(image.body as Buffer).equals(PNG_BYTES)).toBe(true);
+
+    const removed = await request(app.getHttpServer())
+      .delete('/auth/me/avatar')
+      .set('Cookie', cookieHeader(accessToken, refreshToken))
+      .expect(200);
+    expect(
+      (removed.body as { user: { avatarUpdatedAt: null } }).user
+        .avatarUpdatedAt,
+    ).toBeNull();
+
+    await request(app.getHttpServer())
+      .get(`/auth/avatar/${user.id}`)
+      .expect(404);
+  });
+
+  it('refuse une photo dont le contenu dément le type annoncé', async () => {
+    const fake = `data:image/png;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`;
+
+    await request(app.getHttpServer())
+      .put('/auth/me/avatar')
+      .set('Cookie', cookieHeader(accessToken, refreshToken))
+      .send({ data: fake })
+      .expect(400);
   });
 
   it('refuse un login au mauvais mot de passe', async () => {
@@ -235,6 +319,103 @@ describe('Auth (e2e)', () => {
 
   it('accepte un logout sans session en cours', async () => {
     await request(app.getHttpServer()).post('/auth/logout').expect(204);
+  });
+
+  /**
+   * Droit à l'effacement. Sur son propre compte, pour ne pas emporter celui
+   * que les tests précédents se passent de main en main.
+   */
+  describe('suppression du compte (RGPD)', () => {
+    const doomedEmail = `e2e-rgpd-${Date.now()}@undercover.test`;
+    let cookies: string[];
+    let userId: string;
+
+    beforeAll(async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email: doomedEmail, password: PASSWORD })
+        .expect(201);
+
+      cookies = cookieHeader(
+        cookieValue(res, 'access_token'),
+        cookieValue(res, 'refresh_token'),
+      );
+      userId = (res.body as { user: { id: string } }).user.id;
+
+      // De quoi vérifier que l'effacement emporte aussi ce qui ne part pas en
+      // cascade : ces deux tables n'ont pas de clé étrangère vers `users`.
+      await prisma.dailyUsage.create({
+        data: {
+          subject: `user:${userId}`,
+          day: new Date('2026-08-04'),
+          used: 3,
+        },
+      });
+      await prisma.contentDraw.create({
+        data: { subject: `user:${userId}`, kind: 'pair', refId: 'paire-e2e' },
+      });
+    });
+
+    afterAll(async () => {
+      await prisma.user.deleteMany({ where: { email: doomedEmail } });
+      await prisma.dailyUsage.deleteMany({
+        where: { subject: `user:${userId}` },
+      });
+      await prisma.contentDraw.deleteMany({
+        where: { subject: `user:${userId}` },
+      });
+    });
+
+    it('refuse la suppression sur un mauvais mot de passe', async () => {
+      // Une session ouverte ne suffit pas : le mot de passe est réexigé.
+      // 403 et non 401 — la session est valable, c'est la confirmation qui
+      // échoue, et un 401 ferait rejouer la requête au front après rotation.
+      await request(app.getHttpServer())
+        .delete('/auth/me')
+        .set('Cookie', cookies)
+        .send({ password: 'pas-le-bon' })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .delete('/auth/me')
+        .set('Cookie', cookies)
+        .send({})
+        .expect(403);
+
+      expect(await prisma.user.count({ where: { id: userId } })).toBe(1);
+    });
+
+    it('efface le compte, ses traces et la session', async () => {
+      const res = await request(app.getHttpServer())
+        .delete('/auth/me')
+        .set('Cookie', cookies)
+        .send({ password: PASSWORD })
+        .expect(204);
+
+      // Cookies vidés : l'onglet ne reste pas avec une session fantôme.
+      expect(cookieValue(res, 'access_token')).toBe('');
+      expect(cookieValue(res, 'refresh_token')).toBe('');
+
+      expect(await prisma.user.count({ where: { id: userId } })).toBe(0);
+      // Cascade depuis `users`.
+      expect(await prisma.refreshToken.count({ where: { userId } })).toBe(0);
+      // Et les deux tables que la cascade n'atteint pas.
+      expect(
+        await prisma.dailyUsage.count({ where: { subject: `user:${userId}` } }),
+      ).toBe(0);
+      expect(
+        await prisma.contentDraw.count({
+          where: { subject: `user:${userId}` },
+        }),
+      ).toBe(0);
+
+      // Le token signé survit à son compte : la stratégie relit l'utilisateur
+      // à chaque requête, c'est ce qui rend la session immédiatement morte.
+      await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Cookie', cookies)
+        .expect(401);
+    });
   });
 
   it('annonce les fournisseurs sociaux réellement branchés', async () => {

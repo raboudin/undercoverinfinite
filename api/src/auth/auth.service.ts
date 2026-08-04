@@ -1,31 +1,46 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
+import { userSubject } from '../entitlements/subject';
 import { PrismaService } from '../prisma/prisma.service';
 import { isUniqueViolation } from '../prisma/prisma.errors';
+import { parseAvatarDataUrl, type AvatarMimeType } from './avatar';
 import type {
   AuthResult,
   OAuthProfile,
   OAuthProviderName,
   PublicUser,
 } from './auth.types';
+import type { DeleteAccountDto } from './dto/delete-account.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import type { UpdateProfileDto } from './dto/update-profile.dto';
 import { TokenService } from './token.service';
+import {
+  PUBLIC_USER_INCLUDE,
+  toPublicUser,
+  type PublicUserRow,
+} from './user.mapper';
 
 /** Coût bcrypt. 12 ≈ 250 ms sur un CPU serveur courant en 2026. */
 const BCRYPT_ROUNDS = 12;
 
 /** Forme minimale de la ligne `users` dont ce service a besoin. */
-interface UserRow {
-  id: string;
-  email: string;
-  displayName: string | null;
+interface UserRow extends PublicUserRow {
   passwordHash: string | null;
+}
+
+/** Photo de profil telle que servie par `GET /auth/avatar/:userId`. */
+export interface AvatarPayload {
+  mimeType: AvatarMimeType;
+  bytes: Buffer;
+  updatedAt: Date;
 }
 
 let dummyHashPromise: Promise<string> | null = null;
@@ -43,10 +58,6 @@ function dummyHash(): Promise<string> {
 /** Les emails sont comparés et stockés en minuscules, sans espaces autour. */
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
-}
-
-function toPublicUser(user: UserRow): PublicUser {
-  return { id: user.id, email: user.email, displayName: user.displayName };
 }
 
 @Injectable()
@@ -81,7 +92,10 @@ export class AuthService {
 
   async login(dto: LoginDto): Promise<AuthResult> {
     const email = normalizeEmail(dto.email);
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: PUBLIC_USER_INCLUDE,
+    });
 
     // `passwordHash` nul = compte créé par OAuth seul. Le message reste
     // volontairement identique dans les trois cas (email inconnu, compte sans
@@ -123,6 +137,7 @@ export class AuthService {
   async loginWithOAuth(profile: OAuthProfile): Promise<AuthResult> {
     const linked = await this.prisma.user.findFirst({
       where: this.providerFilter(profile.provider, profile.providerId),
+      include: PUBLIC_USER_INCLUDE,
     });
     if (linked) return this.issueFor(linked);
 
@@ -147,6 +162,7 @@ export class AuthService {
           ...this.providerFilter(profile.provider, profile.providerId),
           displayName: existing.displayName ?? profile.displayName,
         },
+        include: PUBLIC_USER_INCLUDE,
       });
       this.logger.log(`${profile.provider} lié au compte ${user.id}`);
       return this.issueFor(user);
@@ -165,11 +181,140 @@ export class AuthService {
       if (isUniqueViolation(error)) {
         // Course entre deux callbacks du même utilisateur : le compte vient
         // d'être créé par l'autre requête, on le rejoue en lecture.
-        const user = await this.prisma.user.findUnique({ where: { email } });
+        const user = await this.prisma.user.findUnique({
+          where: { email },
+          include: PUBLIC_USER_INCLUDE,
+        });
         if (user) return this.issueFor(user);
       }
       throw error;
     }
+  }
+
+  /**
+   * Met à jour le dossier d'agent. Un champ absent du corps reste inchangé
+   * (sémantique PATCH) ; un nom de code vide l'efface, le compte retombant
+   * alors sur la partie locale de son email pour s'afficher.
+   */
+  async updateProfile(
+    userId: string,
+    dto: UpdateProfileDto,
+  ): Promise<PublicUser> {
+    const data: { displayName?: string | null } = {};
+    if (dto.displayName !== undefined) {
+      const trimmed = dto.displayName.trim();
+      data.displayName = trimmed.length > 0 ? trimmed : null;
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+      include: PUBLIC_USER_INCLUDE,
+    });
+    return toPublicUser(user);
+  }
+
+  /**
+   * Remplace la photo de profil. `upsert` plutôt que create/update : reposer
+   * une photo est le geste courant, et `updatedAt` change à chaque fois — c'est
+   * lui qui invalide l'URL en cache côté navigateur.
+   */
+  async setAvatar(userId: string, dataUrl: string): Promise<PublicUser> {
+    const { mimeType, bytes } = parseAvatarDataUrl(dataUrl);
+    // Les colonnes `Bytes` de Prisma 7 attendent un `Uint8Array` adossé à un
+    // vrai `ArrayBuffer` ; le `Buffer` de Node est typé sur `ArrayBufferLike`,
+    // que TypeScript refuse ici. La copie porte sur 64 Kio au plus.
+    const data = new Uint8Array(bytes);
+
+    await this.prisma.userAvatar.upsert({
+      where: { userId },
+      create: { userId, mimeType, data },
+      update: { mimeType, data },
+    });
+
+    return this.publicUser(userId);
+  }
+
+  /** Retire la photo. `deleteMany` : effacer deux fois n'est pas une erreur. */
+  async removeAvatar(userId: string): Promise<PublicUser> {
+    await this.prisma.userAvatar.deleteMany({ where: { userId } });
+    return this.publicUser(userId);
+  }
+
+  async readAvatar(userId: string): Promise<AvatarPayload> {
+    const avatar = await this.prisma.userAvatar.findUnique({
+      where: { userId },
+    });
+    if (!avatar) {
+      throw new NotFoundException("Cet agent n'a pas de photo.");
+    }
+    return {
+      // Le type a été validé à l'écriture (`parseAvatarDataUrl`) : rien
+      // d'autre que les trois formats acceptés n'a pu entrer en base.
+      mimeType: avatar.mimeType as AvatarMimeType,
+      // Prisma rend les `Bytes` en `Uint8Array` ; Express veut un Buffer.
+      bytes: Buffer.from(avatar.data),
+      updatedAt: avatar.updatedAt,
+    };
+  }
+
+  /**
+   * Suppression du compte (RGPD, droit à l'effacement). Irréversible.
+   *
+   * Le mot de passe est réexigé quand le compte en a un : une session laissée
+   * ouverte ne doit pas suffire à effacer le dossier. Un compte né d'un OAuth
+   * n'en a pas — la session y fait seule autorité.
+   */
+  async deleteAccount(userId: string, dto: DeleteAccountDto): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('Compte introuvable.');
+    }
+
+    if (user.passwordHash) {
+      const ok =
+        !!dto.password &&
+        (await bcrypt.compare(dto.password, user.passwordHash));
+      if (!ok) {
+        // 403 et non 401 : la session est parfaitement valable, c'est la
+        // re-authentification qui échoue. Un 401 déclencherait côté front la
+        // rotation du refresh token puis le rejeu de la requête — donc un
+        // second envoi du mauvais mot de passe pour rien.
+        throw new ForbiddenException(
+          'Mot de passe incorrect : le dossier n’a pas été supprimé.',
+        );
+      }
+    }
+
+    const subject = userSubject(userId).key;
+
+    // `daily_usage` et `content_draws` ne portent pas de clé étrangère vers
+    // `users` — leur colonne `subject` couvre aussi les appareils anonymes — et
+    // la cascade ne les emporte donc pas. Il faut les nommer, sinon la
+    // consommation et l'historique de tirage du compte survivraient à son
+    // effacement. Le reste (sessions, packs, portefeuille, photo) part en
+    // cascade depuis `users`.
+    await this.prisma.$transaction([
+      this.prisma.dailyUsage.deleteMany({ where: { subject } }),
+      this.prisma.contentDraw.deleteMany({ where: { subject } }),
+      this.prisma.user.delete({ where: { id: userId } }),
+    ]);
+
+    this.logger.log(
+      `Dossier ${userId} supprimé à la demande de son titulaire.`,
+    );
+  }
+
+  /** Relit l'utilisateur avec sa photo, après une écriture sur celle-ci. */
+  private async publicUser(userId: string): Promise<PublicUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: PUBLIC_USER_INCLUDE,
+    });
+    if (!user) {
+      throw new UnauthorizedException('Compte introuvable.');
+    }
+    return toPublicUser(user);
   }
 
   /** Filtre/données de la colonne d'identité du fournisseur. */

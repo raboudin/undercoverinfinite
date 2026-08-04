@@ -1,9 +1,16 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import type { OAuthProfile } from './auth.types';
 import type { TokenService } from './token.service';
+import { PUBLIC_USER_INCLUDE } from './user.mapper';
 
 const PASSWORD = 'motdepasse-solide';
 
@@ -33,7 +40,16 @@ describe('AuthService', () => {
       findUnique: jest.Mock;
       findFirst: jest.Mock;
       update: jest.Mock;
+      delete: jest.Mock;
     };
+    userAvatar: {
+      upsert: jest.Mock;
+      deleteMany: jest.Mock;
+      findUnique: jest.Mock;
+    };
+    dailyUsage: { deleteMany: jest.Mock };
+    contentDraw: { deleteMany: jest.Mock };
+    $transaction: jest.Mock;
   };
   let tokens: {
     issuePair: jest.Mock;
@@ -53,7 +69,18 @@ describe('AuthService', () => {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
       },
+      userAvatar: {
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+        findUnique: jest.fn(),
+      },
+      dailyUsage: { deleteMany: jest.fn() },
+      contentDraw: { deleteMany: jest.fn() },
+      // Les opérations sont passées telles quelles : ce qui compte ici est
+      // *lesquelles* partent ensemble, pas ce que la base en renvoie.
+      $transaction: jest.fn().mockResolvedValue([]),
     };
     tokens = {
       issuePair: jest
@@ -95,6 +122,8 @@ describe('AuthService', () => {
         id: 'user-1',
         email: 'agent@undercover.test',
         displayName: 'Agent 42',
+        avatarUpdatedAt: null,
+        hasPassword: true,
       });
       expect(result.tokens.refreshToken).toBe('refresh');
     });
@@ -134,6 +163,7 @@ describe('AuthService', () => {
 
       expect(prisma.user.findUnique).toHaveBeenCalledWith({
         where: { email: 'agent@undercover.test' },
+        include: PUBLIC_USER_INCLUDE,
       });
       expect(result.user.id).toBe('user-1');
       expect(tokens.issuePair).toHaveBeenCalledTimes(1);
@@ -210,6 +240,7 @@ describe('AuthService', () => {
 
       expect(prisma.user.findFirst).toHaveBeenCalledWith({
         where: { googleId: 'google-42' },
+        include: PUBLIC_USER_INCLUDE,
       });
       expect(prisma.user.create).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
@@ -258,6 +289,7 @@ describe('AuthService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
         data: { googleId: 'google-42', displayName: 'Agent 42' },
+        include: PUBLIC_USER_INCLUDE,
       });
     });
 
@@ -301,6 +333,7 @@ describe('AuthService', () => {
 
       expect(prisma.user.findFirst).toHaveBeenCalledWith({
         where: { facebookId: 'fb-7' },
+        include: PUBLIC_USER_INCLUDE,
       });
       expect(prisma.user.create).toHaveBeenCalledWith({
         data: {
@@ -329,6 +362,179 @@ describe('AuthService', () => {
       const result = await service.loginWithOAuth(googleProfile());
 
       expect(result.user.id).toBe('user-1');
+    });
+  });
+
+  describe('updateProfile', () => {
+    beforeEach(() => {
+      prisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        email: 'agent@undercover.test',
+        displayName: 'Corbeau',
+      });
+    });
+
+    it('enregistre le nom de code sans ses espaces', async () => {
+      const user = await service.updateProfile('user-1', {
+        displayName: '  Corbeau  ',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { displayName: 'Corbeau' },
+        include: PUBLIC_USER_INCLUDE,
+      });
+      expect(user.displayName).toBe('Corbeau');
+    });
+
+    it('efface le nom de code sur une chaîne vide', async () => {
+      // Sans quoi il n'y aurait aucun moyen de revenir à l'affichage par email.
+      await service.updateProfile('user-1', { displayName: '   ' });
+
+      expect(firstArg<{ data: unknown }>(prisma.user.update).data).toEqual({
+        displayName: null,
+      });
+    });
+
+    it('laisse le nom intact quand le champ est absent (sémantique PATCH)', async () => {
+      await service.updateProfile('user-1', {});
+
+      expect(firstArg<{ data: unknown }>(prisma.user.update).data).toEqual({});
+    });
+  });
+
+  describe('avatar', () => {
+    /** Plus petit PNG valide : en-tête magique suivi d'un peu de contenu. */
+    const PNG_BYTES = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01,
+    ]);
+    const PNG_DATA_URL = `data:image/png;base64,${PNG_BYTES.toString('base64')}`;
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'agent@undercover.test',
+        displayName: 'Corbeau',
+        avatar: { updatedAt: new Date('2026-08-04T10:00:00.000Z') },
+      });
+    });
+
+    it('range les octets décodés et annonce la nouvelle date', async () => {
+      const user = await service.setAvatar('user-1', PNG_DATA_URL);
+
+      const call = firstArg<{
+        create: { mimeType: string; data: Uint8Array };
+      }>(prisma.userAvatar.upsert);
+      expect(call.create.mimeType).toBe('image/png');
+      expect(Buffer.from(call.create.data).equals(PNG_BYTES)).toBe(true);
+      // C'est cette date que le front colle en `?v=` sur l'URL de la photo.
+      expect(user.avatarUpdatedAt).toBe('2026-08-04T10:00:00.000Z');
+    });
+
+    it('refuse une image dont le contenu dément le type annoncé', async () => {
+      await expect(
+        service.setAvatar(
+          'user-1',
+          `data:image/png;base64,${Buffer.from('<script>').toString('base64')}`,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.userAvatar.upsert).not.toHaveBeenCalled();
+    });
+
+    it('retire la photo sans se plaindre s’il n’y en avait pas', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'agent@undercover.test',
+        displayName: 'Corbeau',
+        avatar: null,
+      });
+
+      const user = await service.removeAvatar('user-1');
+
+      expect(prisma.userAvatar.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
+      expect(user.avatarUpdatedAt).toBeNull();
+    });
+
+    it('sert les octets stockés pour l’affichage', async () => {
+      prisma.userAvatar.findUnique.mockResolvedValue({
+        userId: 'user-1',
+        mimeType: 'image/webp',
+        data: new Uint8Array(PNG_BYTES),
+        updatedAt: new Date('2026-08-04T10:00:00.000Z'),
+      });
+
+      const avatar = await service.readAvatar('user-1');
+
+      expect(avatar.mimeType).toBe('image/webp');
+      expect(avatar.bytes.equals(PNG_BYTES)).toBe(true);
+    });
+
+    it('répond 404 pour un agent sans photo', async () => {
+      prisma.userAvatar.findUnique.mockResolvedValue(null);
+
+      await expect(service.readAvatar('user-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('deleteAccount', () => {
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'agent@undercover.test',
+        displayName: 'Corbeau',
+        passwordHash,
+      });
+    });
+
+    it('exige le mot de passe courant quand le compte en a un', async () => {
+      // 403 et non 401 : la session est valable, c'est la re-authentification
+      // qui échoue — un 401 ferait rejouer la requête au client après rotation.
+      await expect(
+        service.deleteAccount('user-1', { password: 'pas-le-bon' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.deleteAccount('user-1', {})).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('emporte le compte et les traces qui ne partent pas en cascade', async () => {
+      await service.deleteAccount('user-1', { password: PASSWORD });
+
+      // `daily_usage` et `content_draws` n'ont pas de clé étrangère vers
+      // `users` : sans ces deux suppressions, la consommation et l'historique
+      // de tirage survivraient à l'effacement du dossier.
+      expect(prisma.dailyUsage.deleteMany).toHaveBeenCalledWith({
+        where: { subject: 'user:user-1' },
+      });
+      expect(prisma.contentDraw.deleteMany).toHaveBeenCalledWith({
+        where: { subject: 'user:user-1' },
+      });
+      expect(prisma.user.delete).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+      });
+      // Le tout dans une seule transaction : un effacement à moitié fait
+      // laisserait des traces orphelines qu'aucun compte ne réclamerait plus.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(firstArg<unknown[]>(prisma.$transaction)).toHaveLength(3);
+    });
+
+    it('accepte la suppression d’un compte OAuth, qui n’a pas de mot de passe', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-oauth',
+        email: 'agent@undercover.test',
+        displayName: null,
+        passwordHash: null,
+      });
+
+      await expect(
+        service.deleteAccount('user-oauth', {}),
+      ).resolves.toBeUndefined();
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
   });
 });
