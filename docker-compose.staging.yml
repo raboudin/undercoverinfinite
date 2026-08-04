@@ -84,6 +84,8 @@ services:
     restart: unless-stopped
     environment:
       NUXT_PUBLIC_API_BASE: https://api-staging.undercoverinfinite.com
+    volumes:
+      - ./audio/music.mp3:/app/.output/public/audio/music.mp3:ro
     networks:
       - proxy
     labels:
