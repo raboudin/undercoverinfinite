@@ -16,7 +16,7 @@ function isClient() {
 function element(): HTMLAudioElement | null {
   if (!isClient()) return null
   if (!audio) {
-    audio = new Audio('/audio/music-fond.mp3')
+    audio = new Audio('/audio/music.mp3')
     audio.loop = true
     audio.volume = 0.22
   }

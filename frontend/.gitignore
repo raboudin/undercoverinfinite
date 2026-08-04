@@ -24,6 +24,6 @@ logs
 !.env.example
 
 # Gros binaires audio — fournis localement, pas versionnés.
-# public/audio/music-fond.mp3 est attendu par useBackgroundMusic.ts ;
+# public/audio/music.mp3 est attendu par useBackgroundMusic.ts ;
 # sans lui l'app fonctionne mais la musique de fond reste muette.
 public/audio/*.mp3
