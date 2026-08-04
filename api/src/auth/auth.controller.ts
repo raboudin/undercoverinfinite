@@ -1,12 +1,16 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Inject,
   Logger,
+  Param,
+  Patch,
   Post,
+  Put,
   Req,
   Res,
   UseGuards,
@@ -26,8 +30,11 @@ import type {
   PublicUser,
 } from './auth.types';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { AvatarDto } from './dto/avatar.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { FacebookOAuthGuard, GoogleOAuthGuard } from './guards/oauth.guards';
 
@@ -35,6 +42,14 @@ import { FacebookOAuthGuard, GoogleOAuthGuard } from './guards/oauth.guards';
 interface SessionResponse {
   user: PublicUser;
 }
+
+/**
+ * Durée de cache d'une photo de profil. Une heure : l'URL change à chaque
+ * dépôt (`?v=`), le cache n'a donc pas à être court pour rester juste — mais il
+ * reste modeste pour qu'une photo supprimée disparaisse vite des caches
+ * intermédiaires, ce qu'un effacement RGPD est en droit d'attendre.
+ */
+const AVATAR_CACHE_SECONDS = 3600;
 
 @Controller('auth')
 export class AuthController {
@@ -94,6 +109,83 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser): SessionResponse {
     return { user };
+  }
+
+  /** Modifie le dossier d'agent (aujourd'hui : le nom de code). */
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async updateProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateProfileDto,
+  ): Promise<SessionResponse> {
+    return { user: await this.auth.updateProfile(user.id, dto) };
+  }
+
+  /**
+   * Dépose la photo de profil, réduite en vignette carrée par le navigateur et
+   * transmise en data URL. `PUT` : reposer la même image deux fois donne le
+   * même état.
+   */
+  @Put('me/avatar')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async setAvatar(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: AvatarDto,
+  ): Promise<SessionResponse> {
+    return { user: await this.auth.setAvatar(user.id, dto.data) };
+  }
+
+  @Delete('me/avatar')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async removeAvatar(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<SessionResponse> {
+    return { user: await this.auth.removeAvatar(user.id) };
+  }
+
+  /**
+   * Suppression du compte — droit à l'effacement (RGPD). Emporte sessions,
+   * packs, portefeuille, photo, consommation quotidienne et historique de
+   * tirage. Irréversible, et les cookies sont vidés dans la foulée pour que
+   * l'onglet ne reste pas avec une session pointant vers un compte disparu.
+   */
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteAccount(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DeleteAccountDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.auth.deleteAccount(user.id, dto);
+    clearAuthCookies(res, this.config);
+  }
+
+  /**
+   * Photo de profil d'un agent, en clair et sans session : c'est une image
+   * affichée dans un `<img>`, qui ne porte ni en-tête ni cookie garanti (et le
+   * lobby en ligne devra montrer celles des autres joueurs).
+   *
+   * L'URL porte un `?v=<avatarUpdatedAt>` côté client : le cache peut donc être
+   * franc sans jamais servir une photo périmée après un changement.
+   */
+  @Get('avatar/:userId')
+  async avatar(
+    @Param('userId') userId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const avatar = await this.auth.readAvatar(userId);
+    res.setHeader('Content-Type', avatar.mimeType);
+    // Le type est vérifié à l'écriture, mais on interdit quand même au
+    // navigateur de renifler le contenu : une image n'a jamais à être
+    // interprétée autrement que comme une image.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', `public, max-age=${AVATAR_CACHE_SECONDS}`);
+    res.setHeader('Last-Modified', avatar.updatedAt.toUTCString());
+    res.send(avatar.bytes);
   }
 
   /**

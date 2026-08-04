@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTH_CONFIG, type AuthConfig } from './auth.config';
 import type { AccessTokenPayload, PublicUser, TokenPair } from './auth.types';
+import { PUBLIC_USER_INCLUDE, toPublicUser } from './user.mapper';
 
 /** Entropie du refresh token : 256 bits, tirés du CSPRNG de Node. */
 const REFRESH_TOKEN_BYTES = 32;
@@ -75,7 +76,7 @@ export class TokenService {
   }> {
     const record = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: TokenService.hash(refreshToken) },
-      include: { user: true },
+      include: { user: { include: PUBLIC_USER_INCLUDE } },
     });
 
     if (!record) {
@@ -107,11 +108,7 @@ export class TokenService {
       throw new UnauthorizedException('Session invalide ou expirée.');
     }
 
-    const user: PublicUser = {
-      id: record.user.id,
-      email: record.user.email,
-      displayName: record.user.displayName,
-    };
+    const user = toPublicUser(record.user);
     return { user, tokens: await this.issuePair(user) };
   }
 

@@ -22,6 +22,33 @@ describe('Avatar', () => {
     expect(dot.exists()).toBe(false)
   })
 
+  it('affiche la photo quand il y en a une', () => {
+    const wrapper = mount(Avatar, { props: { initial: 'M', src: 'http://api.test/auth/avatar/u1?v=1' } })
+
+    expect(wrapper.get('img').attributes('src')).toBe('http://api.test/auth/avatar/u1?v=1')
+    expect(wrapper.text()).toBe('')
+  })
+
+  it('retombe sur l’initiale si la photo ne charge pas', async () => {
+    // Photo effacée entre-temps, ou cache trop zélé : mieux vaut l'initiale
+    // qu'un carré vide.
+    const wrapper = mount(Avatar, { props: { initial: 'M', src: 'http://api.test/introuvable' } })
+
+    await wrapper.get('img').trigger('error')
+
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.text()).toBe('M')
+  })
+
+  it('retente le chargement quand la photo change', async () => {
+    const wrapper = mount(Avatar, { props: { initial: 'M', src: 'http://api.test/introuvable' } })
+    await wrapper.get('img').trigger('error')
+
+    await wrapper.setProps({ src: 'http://api.test/auth/avatar/u1?v=2' })
+
+    expect(wrapper.find('img').exists()).toBe(true)
+  })
+
   it.each([
     ['online', 'bg-success'],
     ['away', 'bg-amber-5'],

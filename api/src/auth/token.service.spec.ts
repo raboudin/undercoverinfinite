@@ -3,7 +3,9 @@ import type { JwtService } from '@nestjs/jwt';
 import { createHash } from 'node:crypto';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuthConfig } from './auth.config';
+import type { PublicUser } from './auth.types';
 import { TokenService } from './token.service';
+import { PUBLIC_USER_INCLUDE } from './user.mapper';
 
 const CONFIG: AuthConfig = {
   jwtSecret: 'secret-de-test',
@@ -18,10 +20,12 @@ const CONFIG: AuthConfig = {
   },
 };
 
-const USER = {
+const USER: PublicUser = {
   id: 'user-1',
   email: 'agent@undercover.test',
   displayName: null,
+  avatarUpdatedAt: null,
+  hasPassword: false,
 };
 
 function sha256(value: string): string {
@@ -133,7 +137,7 @@ describe('TokenService', () => {
 
       expect(prisma.refreshToken.findUnique).toHaveBeenCalledWith({
         where: { tokenHash: sha256('ancien-token') },
-        include: { user: true },
+        include: { user: { include: PUBLIC_USER_INCLUDE } },
       });
       // Révocation conditionnelle : c'est ce `revokedAt: null` qui empêche
       // deux rotations concurrentes de réussir toutes les deux.
