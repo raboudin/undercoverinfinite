@@ -1,22 +1,9 @@
 <script setup lang="ts">
 import { Lock } from '@lucide/vue'
-import type { ModeId } from '../../composables/useEntitlements'
+import type { ModeCard, ModeId } from '../../composables/useEntitlements'
+import { modeArt } from '../../utils/gameArt'
 
-/**
- * Mode tel que le sert `useEntitlements.modeCards` : le catalogue serveur,
- * enrichi de l'état de déblocage du joueur.
- */
-export interface ModeChoice {
-  id: ModeId
-  label: string
-  tagline: string
-  available: boolean
-  spicy?: boolean
-  unlocked: boolean
-  playable: boolean
-}
-
-withDefaults(defineProps<{ modes?: ModeChoice[] }>(), {
+withDefaults(defineProps<{ modes?: ModeCard[] }>(), {
   modes: () => []
 })
 
@@ -26,7 +13,7 @@ const emit = defineEmits<{ locked: [ModeId] }>()
 
 const selected = defineModel<ModeId>({ default: 'classique' })
 
-function choose(mode: ModeChoice) {
+function choose(mode: ModeCard) {
   if (!mode.unlocked) {
     emit('locked', mode.id)
     return
@@ -38,32 +25,43 @@ function choose(mode: ModeChoice) {
 </script>
 
 <template>
-  <Card class="flex flex-col gap-3">
-    <div class="font-display text-body-s uppercase tracking-caps text-secondary">Type de mission</div>
+  <div class="grid grid-cols-2 gap-3">
+    <button
+      v-for="mode in modes"
+      :key="mode.id"
+      type="button"
+      :aria-pressed="selected === mode.id"
+      :class="[
+        'overflow-hidden rounded-md border bg-surface text-left transition-colors duration-150',
+        selected === mode.id ? 'border-blue-4 shadow-glow-recon' : 'border-subtle shadow-card',
+        mode.playable ? 'cursor-pointer' : 'cursor-default'
+      ]"
+      @click="choose(mode)"
+    >
+      <ArtSlot
+        :src="modeArt(mode.id)"
+        :alt="mode.label"
+        :monogram="mode.label"
+        class="aspect-video w-full"
+        :class="mode.playable ? '' : 'opacity-45'"
+      />
 
-    <div class="grid grid-cols-2 gap-2.5">
-      <button
-        v-for="mode in modes"
-        :key="mode.id"
-        type="button"
-        :aria-pressed="selected === mode.id"
-        :class="[
-          'flex flex-col gap-1 rounded-sm border p-3 text-left transition-colors duration-150',
-          selected === mode.id
-            ? 'border-strong bg-surface-inset shadow-glow-recon'
-            : 'border-subtle bg-surface-inset',
-          mode.playable ? 'cursor-pointer' : 'cursor-default opacity-55'
-        ]"
-        @click="choose(mode)"
-      >
+      <span class="block p-3">
         <span class="flex items-center gap-1.5">
           <Lock v-if="!mode.unlocked" :size="12" class="shrink-0 text-amber-4" />
-          <span class="font-display text-body-s uppercase tracking-caps text-primary">{{ mode.label }}</span>
+          <span
+            class="truncate font-display text-body uppercase tracking-caps"
+            :class="mode.playable ? 'text-primary' : 'text-secondary'"
+          >{{ mode.label }}</span>
         </span>
-        <span class="font-mono text-caption leading-snug text-tertiary">{{ mode.tagline }}</span>
-        <span v-if="mode.unlocked && !mode.available" class="font-mono text-caption text-amber-4">Bientôt</span>
-        <span v-else-if="!mode.unlocked" class="font-mono text-caption text-amber-4">À débloquer</span>
-      </button>
-    </div>
-  </Card>
+        <span class="mt-1 block font-mono text-caption leading-snug text-tertiary">{{ mode.tagline }}</span>
+        <span v-if="!mode.unlocked" class="mt-1.5 block font-mono text-caption uppercase tracking-caps text-amber-4">
+          À débloquer
+        </span>
+        <span v-else-if="!mode.available" class="mt-1.5 block font-mono text-caption uppercase tracking-caps text-amber-4">
+          Bientôt
+        </span>
+      </span>
+    </button>
+  </div>
 </template>

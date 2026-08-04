@@ -53,8 +53,8 @@ const CATALOG: Catalog = {
     { id: 'diy', label: 'DIY', tagline: '', available: true }
   ],
   themes: [
-    { id: 'general', label: 'Tous horizons', generalist: true },
-    { id: 'football', label: 'Football', generalist: false }
+    { id: 'general', label: 'Tous horizons', tagline: '', generalist: true },
+    { id: 'football', label: 'Football', tagline: '', generalist: false }
   ],
   freeDailyCredits: 5,
   unlimitedDailyCredits: 50
@@ -133,8 +133,8 @@ describe('createEntitlements', () => {
     await entitlements.refresh()
 
     expect(entitlements.themeCards.value).toEqual([
-      { id: 'general', label: 'Tous horizons', generalist: true, unlocked: true },
-      { id: 'football', label: 'Football', generalist: false, unlocked: false }
+      { id: 'general', label: 'Tous horizons', tagline: '', generalist: true, unlocked: true },
+      { id: 'football', label: 'Football', tagline: '', generalist: false, unlocked: false }
     ])
   })
 

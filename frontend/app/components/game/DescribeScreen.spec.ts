@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import DescribeScreen from './DescribeScreen.vue'
+import GameTable from './GameTable.vue'
 import Button from '../core/Button.vue'
-import Avatar from '../data-display/Avatar.vue'
 import Card from '../data-display/Card.vue'
-import PlayerRow from '../data-display/PlayerRow.vue'
 import ProgressTimer from '../feedback/ProgressTimer.vue'
 import type { Player } from '../../composables/useGame'
 
-const global = { components: { Button, Avatar, Card, PlayerRow, ProgressTimer } }
+const global = { components: { Button, Card, ProgressTimer, GameTable } }
 
 const order: Player[] = ['Marion', 'Karim', 'Sami', 'Léa'].map((name, i) => ({
   id: `agent-${i}`,
@@ -20,7 +19,7 @@ const order: Player[] = ['Marion', 'Karim', 'Sami', 'Léa'].map((name, i) => ({
 
 function mountScreen(speakerIndex = 0, round = 1) {
   return mount(DescribeScreen, {
-    props: { round, speaker: order[speakerIndex]!, order, speakerIndex },
+    props: { round, speaker: order[speakerIndex]!, players: order, order, speakerIndex },
     global
   })
 }
@@ -33,17 +32,37 @@ describe('DescribeScreen', () => {
     expect(wrapper.text()).toContain('2 / 4')
   })
 
-  it('liste tout l’ordre de parole', () => {
-    const rows = mountScreen().findAllComponents(PlayerRow)
-    expect(rows.map(row => row.props('name'))).toEqual(['Marion', 'Karim', 'Sami', 'Léa'])
+  it('dresse la table entière, sans rien retourner', () => {
+    const wrapper = mountScreen()
+    expect(wrapper.findComponent(GameTable).findAll('.flip-card')).toHaveLength(4)
+    expect(wrapper.findAll('.flip-card--up')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('Passeport')
   })
 
-  it('met en avant l’orateur courant dans la liste', () => {
-    // Le halo est porté par le conteneur de la ligne ; la Card d'en-tête utilise
-    // la même classe, d'où la recherche ciblée sur les lignes de joueurs.
-    const rows = mountScreen(2).findAllComponents(PlayerRow)
-    const glow = rows.map(row => row.element.parentElement!.className.includes('shadow-glow-recon'))
+  it('allume le siège de l’orateur courant', () => {
+    const glow = mountScreen(2)
+      .findComponent(GameTable)
+      .findAll('.flip-card')
+      .map(card => card.classes().includes('shadow-glow-recon'))
     expect(glow).toEqual([false, false, true, false])
+  })
+
+  it('annonce l’agent suivant dans l’ordre de parole', () => {
+    expect(mountScreen(0).text()).toContain('Ensuite : Karim')
+    expect(mountScreen(3).text()).not.toContain('Ensuite')
+  })
+
+  it('laisse retournées les cartes des agents grillés', () => {
+    const players = order.map((player, i) =>
+      i === 3 ? { ...player, alive: false, word: 'Douane' } : player
+    )
+    const wrapper = mount(DescribeScreen, {
+      props: { round: 2, speaker: order[0]!, players, order: players.slice(0, 3), speakerIndex: 0 },
+      global
+    })
+
+    expect(wrapper.findAll('.flip-card--up')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Douane')
   })
 
   it('fait progresser la barre au fil des prises de parole', () => {
@@ -72,6 +91,7 @@ describe('DescribeScreen — mode défi', () => {
       props: {
         round: 1,
         speaker: order[0]!,
+        players: order,
         order,
         speakerIndex: 0,
         challenge: 'Chaque description doit contenir une couleur'
@@ -98,6 +118,7 @@ describe('DescribeScreen — mode chrono', () => {
       props: {
         round: 1,
         speaker: order[0]!,
+        players: order,
         order,
         speakerIndex: 0,
         timed: true,

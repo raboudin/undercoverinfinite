@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ModeSelector from './ModeSelector.vue'
-import Card from '../data-display/Card.vue'
+import ArtSlot from './ArtSlot.vue'
+import type { ModeCard } from '../../composables/useEntitlements'
 
-const global = { components: { Card } }
+const global = { components: { ArtSlot } }
 
-const MODES = [
-  { id: 'classique' as const, label: 'Classique', tagline: 'L’originale.', available: true, unlocked: true, playable: true },
-  { id: 'hot' as const, label: 'Hot', tagline: 'Mots osés.', available: true, spicy: true, unlocked: false, playable: false },
-  { id: 'teams' as const, label: 'Teams', tagline: 'Deux équipes.', available: false, unlocked: true, playable: false }
+const MODES: ModeCard[] = [
+  { id: 'classique', label: 'Classique', tagline: 'L’originale.', available: true, unlocked: true, playable: true },
+  { id: 'hot', label: 'Hot', tagline: 'Mots osés.', available: true, spicy: true, unlocked: false, playable: false },
+  { id: 'teams', label: 'Teams', tagline: 'Deux équipes.', available: false, unlocked: true, playable: false }
 ]
 
 function selector(modelValue = 'classique') {
@@ -28,6 +29,13 @@ describe('ModeSelector', () => {
     expect(wrapper.text()).toContain('L’originale.')
   })
 
+  /** Un emplacement d'illustration par mode, en cartouche tant qu'il est vide. */
+  it('réserve un visuel à chaque mode', () => {
+    const slots = selector().findAllComponents(ArtSlot)
+    expect(slots).toHaveLength(3)
+    expect(slots.map(slot => slot.text())).toEqual(['CL', 'HO', 'TE'])
+  })
+
   it('marque le mode courant', () => {
     expect(modeAt(selector(), 0).attributes('aria-pressed')).toBe('true')
     expect(modeAt(selector(), 1).attributes('aria-pressed')).toBe('false')
@@ -36,7 +44,10 @@ describe('ModeSelector', () => {
   it('sélectionne un mode débloqué', async () => {
     const wrapper = mount(ModeSelector, {
       props: {
-        modes: [...MODES, { id: 'chrono' as const, label: 'Chrono', tagline: '', available: true, unlocked: true, playable: true }],
+        modes: [
+          ...MODES,
+          { id: 'chrono' as const, label: 'Chrono', tagline: '', available: true, unlocked: true, playable: true }
+        ],
         modelValue: 'classique'
       },
       global

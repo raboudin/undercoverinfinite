@@ -2,10 +2,14 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Target, Timer } from '@lucide/vue'
 import type { Player } from '../../composables/useGame'
+import type { TableSeat } from './GameTable.vue'
 
 const props = withDefaults(defineProps<{
   round: number
   speaker: Player
+  /** Toute la table, dans l'ordre des sièges. */
+  players: Player[]
+  /** Ordre de parole de la manche : il tourne, contrairement aux sièges. */
   order: Player[]
   speakerIndex: number
   /** Mode chrono : la parole est minutée. */
@@ -23,6 +27,23 @@ const emit = defineEmits<{ next: [] }>()
 
 const isLastSpeaker = computed(() => props.speakerIndex === props.order.length - 1)
 const progress = computed(() => (props.speakerIndex + 1) / props.order.length)
+
+/**
+ * L'ordre de parole tourne d'une manche à l'autre alors que les sièges, eux,
+ * ne bougent pas : annoncer le suivant évite d'avoir à le chercher sur la table.
+ */
+const nextSpeaker = computed(() => props.order[props.speakerIndex + 1] ?? null)
+
+/** L'orateur s'allume à sa place ; les grillés gardent leur carte retournée. */
+const seats = computed<TableSeat[]>(() =>
+  props.players.map(player => ({
+    id: player.id,
+    name: player.name,
+    state: !player.alive ? 'eliminated' : player.id === props.speaker.id ? 'active' : 'idle',
+    faceUp: !player.alive,
+    word: player.alive ? null : player.word
+  }))
+)
 
 const remaining = ref(props.timerSeconds)
 let ticker: ReturnType<typeof setInterval> | null = null
@@ -84,13 +105,15 @@ const timeCritical = computed(() => timeProgress.value <= 0.25)
       </div>
     </Card>
 
-    <Card glow="recon" class="flex flex-col items-center gap-4 py-8 text-center">
-      <Avatar :initial="speaker.name[0]" status="online" :size="64" />
-      <div class="font-display text-display-s uppercase tracking-caps text-primary">{{ speaker.name }}</div>
-      <p class="max-w-xs text-body-s text-secondary">
-        À toi. Donne un seul mot en lien avec ta couverture. Assez précis pour prouver que tu es loyal, assez vague pour ne pas te griller.
-      </p>
-    </Card>
+    <GameTable :seats="seats">
+      <div class="font-display text-body uppercase tracking-caps text-primary">{{ speaker.name }}</div>
+      <div class="mt-1 font-mono text-caption leading-snug text-tertiary">à toi de parler</div>
+    </GameTable>
+
+    <p class="text-center text-body-s text-secondary">
+      Donne un seul mot en lien avec ta couverture. Assez précis pour prouver que tu es loyal,
+      assez vague pour ne pas te griller.
+    </p>
 
     <div v-if="timed" class="flex items-center gap-3">
       <Timer :size="16" :class="timeCritical ? 'shrink-0 text-red-4' : 'shrink-0 text-secondary'" />
@@ -104,16 +127,9 @@ const timeCritical = computed(() => timeProgress.value <= 0.25)
     </div>
     <ProgressTimer v-else :pct="progress" label="TOUR DE PAROLE" />
 
-    <div class="flex flex-col gap-2">
-      <div
-        v-for="(player, index) in order"
-        :key="player.id"
-        class="rounded-sm transition-shadow duration-150"
-        :class="index === speakerIndex ? 'shadow-glow-recon' : ''"
-      >
-        <PlayerRow :name="player.name" status="active" />
-      </div>
-    </div>
+    <p v-if="nextSpeaker" class="text-center font-mono text-caption uppercase tracking-caps text-tertiary">
+      Ensuite : {{ nextSpeaker.name }}
+    </p>
 
     <Button size="l" class="w-full" @click="emit('next')">
       {{ isLastSpeaker ? 'Ouvrir le vote' : 'Agent suivant' }}

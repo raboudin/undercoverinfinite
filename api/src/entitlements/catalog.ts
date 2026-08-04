@@ -115,6 +115,12 @@ export type ThemeId = (typeof THEME_IDS)[number];
 export interface ThemeDefinition {
   id: ThemeId;
   label: string;
+  /**
+   * Une phrase pour la vitrine : le front affiche un thème par écran, il lui
+   * faut de quoi remplir la fiche. C'est de la copie, pas une règle — d'où sa
+   * place ici plutôt que dans le front, qui ne connaît pas la liste des thèmes.
+   */
+  tagline: string;
   /** Généraliste = accessible à tous, compte ou non, pack ou non. */
   generalist: boolean;
   /** Consigne injectée telle quelle dans le prompt LLM. */
@@ -125,6 +131,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   general: {
     id: 'general',
     label: 'Tous horizons',
+    tagline: 'Tout le terrain, sans spécialité. Le dossier par défaut.',
     generalist: true,
     prompt:
       'Varie largement les univers : objets du quotidien, lieux, nourriture, métiers, transports, sport, nature.',
@@ -132,6 +139,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   culture: {
     id: 'culture',
     label: 'Culture',
+    tagline: 'Livres, musique, scène et traditions. De quoi bluffer poliment.',
     generalist: true,
     prompt:
       'Registre culture générale : littérature, musique, spectacle, traditions, langue, gastronomie.',
@@ -139,6 +147,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   nature: {
     id: 'nature',
     label: 'Nature',
+    tagline: 'Bêtes, plantes et paysages. Deux espèces voisines, un piège.',
     generalist: true,
     prompt:
       'Registre nature : animaux, plantes, paysages, phénomènes météo, minéraux, milieux marins.',
@@ -146,6 +155,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   technologie: {
     id: 'technologie',
     label: 'Technologie',
+    tagline: 'Machines, réseaux et engins. Le jargon ne sauvera personne.',
     generalist: true,
     prompt:
       'Registre technologie : informatique, réseaux, appareils, ingénierie, transport, espace.',
@@ -153,6 +163,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   personnalites: {
     id: 'personnalites',
     label: 'Personnalités célèbres',
+    tagline: 'Des noms connus de tous. Décris sans jamais le prononcer.',
     generalist: false,
     prompt:
       'Registre personnalités célèbres : des noms propres de personnes connues du grand public francophone (artistes, sportifs, scientifiques, figures politiques). Les deux noms d’une paire doivent appartenir au même domaine.',
@@ -160,6 +171,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   'pop-culture': {
     id: 'pop-culture',
     label: 'Pop culture',
+    tagline: 'Films, séries, jeux et héros. Les références volent bas.',
     generalist: false,
     prompt:
       'Registre pop culture : films, séries, jeux vidéo, mangas, super-héros, musique populaire, personnages de fiction.',
@@ -167,6 +179,8 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   football: {
     id: 'football',
     label: 'Football',
+    tagline:
+      'Joueurs, clubs et gestes techniques. Terrain miné entre supporters.',
     generalist: false,
     prompt:
       'Registre football : joueurs, clubs, compétitions, postes, gestes techniques, stades.',
@@ -174,6 +188,8 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   'pays-etats': {
     id: 'pays-etats',
     label: 'Pays et États',
+    tagline:
+      'Frontières et capitales. Deux voisins qu’on confond tout le temps.',
     generalist: false,
     prompt:
       'Registre géographie politique : pays, États, régions et grandes villes du monde. Les deux éléments d’une paire doivent être facilement confondus (voisins, taille comparable ou réputation proche).',
@@ -181,6 +197,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
   'histoire-arts': {
     id: 'histoire-arts',
     label: 'Histoire et arts',
+    tagline: 'Époques, monuments et chefs-d’œuvre. Les siècles se ressemblent.',
     generalist: false,
     prompt:
       'Registre histoire et arts : époques, mouvements artistiques, œuvres majeures, monuments, personnages historiques.',

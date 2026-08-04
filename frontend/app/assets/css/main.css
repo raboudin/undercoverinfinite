@@ -98,3 +98,43 @@ body {
   background-image: radial-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px);
   background-size: 3px 3px;
 }
+
+/* Feutre de la table : un dégradé radial suffit à creuser le centre. */
+.table-felt {
+  background:
+    radial-gradient(ellipse at 50% 42%, var(--color-ink-3) 0%, var(--color-ink-1) 72%, var(--color-ink-0) 100%);
+}
+
+/* Retournement des cartes (distribution, élimination). Deux faces empilées, la
+   scène porte la perspective : sans elle la rotation reste plate. */
+.flip-scene {
+  perspective: 900px;
+}
+
+.flip-card {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform .5s cubic-bezier(.2, .7, .3, 1);
+}
+
+.flip-card--up {
+  transform: rotateY(180deg);
+}
+
+.flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+}
+
+.flip-face--back {
+  transform: rotateY(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-card {
+    transition: none;
+  }
+}
