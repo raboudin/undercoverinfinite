@@ -10,6 +10,7 @@ import {
 } from '../auth.config';
 import { readCookie } from '../auth.cookies';
 import type { AccessTokenPayload, AuthenticatedUser } from '../auth.types';
+import { PUBLIC_USER_INCLUDE, toPublicUser } from '../user.mapper';
 
 /**
  * Vérifie l'access token lu **dans le cookie httpOnly**, jamais dans l'en-tête
@@ -38,10 +39,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   async validate(payload: AccessTokenPayload): Promise<AuthenticatedUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
+      include: PUBLIC_USER_INCLUDE,
     });
     if (!user) {
       throw new UnauthorizedException('Compte introuvable.');
     }
-    return { id: user.id, email: user.email, displayName: user.displayName };
+    return toPublicUser(user);
   }
 }
