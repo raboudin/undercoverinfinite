@@ -84,8 +84,6 @@ services:
     restart: unless-stopped
     environment:
       NUXT_PUBLIC_API_BASE: https://api.undercoverinfinite.com
-    volumes:
-      - ./audio/music.mp3:/app/.output/public/audio/music.mp3:ro
     networks:
       - proxy
     labels:
@@ -96,6 +94,29 @@ services:
       - traefik.http.routers.undercoverinfinite-prod-app.tls=true
       - traefik.http.routers.undercoverinfinite-prod-app.tls.certresolver=le
       - traefik.http.services.undercoverinfinite-prod-app.loadbalancer.server.port=3000
+
+  # Sert les gros binaires (audio) directement depuis le disque, hors de
+  # l'image Nuxt/Nitro : Nitro fige la liste de ses fichiers publics dans le
+  # bundle JS au moment du `npm run build` (voir nitropack/dist/rollup) et ne
+  # relit jamais le disque ensuite — un fichier ajouté après coup dans
+  # .output/public (bind mount ou pas) reste invisible pour lui. ./audio/
+  # est déposé une fois, à la main, sur le VPS (gitignoré côté repo).
+  static-assets:
+    image: nginx:alpine
+    container_name: undercoverinfinite-prod-static
+    restart: unless-stopped
+    volumes:
+      - ./audio:/usr/share/nginx/html/audio:ro
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.undercoverinfinite-prod-static.rule=Host(`undercoverinfinite.com`) && PathPrefix(`/audio`)
+      - traefik.http.routers.undercoverinfinite-prod-static.entrypoints=websecure
+      - traefik.http.routers.undercoverinfinite-prod-static.tls=true
+      - traefik.http.routers.undercoverinfinite-prod-static.tls.certresolver=le
+      - traefik.http.services.undercoverinfinite-prod-static.loadbalancer.server.port=80
 
 networks:
   proxy:
