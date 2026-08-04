@@ -18,6 +18,8 @@ defineEmits<{ next: [] }>()
  */
 const revealed = ref(false)
 
+const wasUndercover = computed(() => props.player.role === 'undercover')
+
 const seats = computed<TableSeat[]>(() =>
   props.players.map(item => ({
     id: item.id,
@@ -26,6 +28,7 @@ const seats = computed<TableSeat[]>(() =>
     // Les cartes déjà retournées aux manches précédentes restent visibles ; celle
     // du jour attend le geste.
     faceUp: !item.alive && (item.id !== props.player.id || revealed.value),
+    revealing: item.id === props.player.id && revealed.value,
     word: item.alive ? null : item.word,
     disabled: item.id !== props.player.id || revealed.value
   }))
@@ -51,15 +54,24 @@ const seats = computed<TableSeat[]>(() =>
 
     <template v-if="revealed">
       <!--
-        Le mot, et rien que le mot. Dire ici « agent double » ou « agent loyal »
-        remettrait la réponse sur la table et retirerait au débat sa raison
-        d'être : à la table de recouper.
+        Le camp se dit ici, dans le débriefing — jamais sur la carte, qui ne
+        porte que le mot. Une partie à plusieurs manches a besoin de savoir sur
+        quoi elle vient de voter pour que la suivante ait du sens.
       -->
-      <Card class="flex flex-col items-center gap-1.5 py-6 text-center">
+      <Card :glow="wasUndercover ? 'danger' : null" class="flex flex-col items-center gap-2 py-6 text-center">
         <span class="font-mono text-caption uppercase tracking-caps text-tertiary">Son mot de couverture</span>
         <span class="font-display text-display-m uppercase tracking-caps text-secondary">{{ player.word }}</span>
-        <p class="mt-1 max-w-xs text-body-s text-secondary">
-          Le QG n’en dira pas plus. À vous de recouper.
+
+        <RoleTag :tone="wasUndercover ? 'danger' : 'ally'" class="mt-1">
+          {{ wasUndercover ? 'Agent double' : 'Agent loyal' }}
+        </RoleTag>
+        <p class="max-w-xs text-body-s text-secondary">
+          <template v-if="wasUndercover">
+            Un infiltré de moins. Le réseau respire — mais rien ne dit qu’il était seul.
+          </template>
+          <template v-else>
+            Erreur de jugement : {{ player.name }} était des vôtres.
+          </template>
         </p>
       </Card>
 

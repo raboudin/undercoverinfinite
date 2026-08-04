@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { ChevronLeft, Minus, Plus } from '@lucide/vue'
 import {
   DEFAULT_TIMER_SECONDS,
@@ -8,8 +8,7 @@ import {
   MIN_PLAYERS,
   MIN_TIMER_SECONDS,
   maxUndercovers,
-  type GameConfig,
-  type WordPair
+  type GameConfig
 } from '../../composables/useGame'
 import type {
   Credits,
@@ -26,8 +25,6 @@ import logoFull from '../../assets/images/logo-full.png'
 export interface SetupSubmission {
   config: GameConfig
   theme: ThemeId
-  /** Mots saisis à la main (DIY). `null` = le serveur les fournit. */
-  custom: WordPair | null
 }
 
 const props = withDefaults(defineProps<{
@@ -35,8 +32,6 @@ const props = withDefaults(defineProps<{
   /** Modes proposés, hors DIY qui n'est pas un mode mais une source de mots. */
   modes?: ModeCard[]
   themes?: ThemeCard[]
-  /** DIY débloqué (pack infinite). */
-  diyUnlocked?: boolean
   status?: EntitlementsStatus
   credits?: Credits | null
   /** Un tirage est en cours côté serveur. */
@@ -47,7 +42,6 @@ const props = withDefaults(defineProps<{
   error: null,
   modes: () => [],
   themes: () => [],
-  diyUnlocked: false,
   status: 'ready',
   credits: null,
   drawing: false,
@@ -75,10 +69,9 @@ const undercoverCount = ref(1)
 const mode = ref<ModeId>('classique')
 const theme = ref<ThemeId>('general')
 const timerSeconds = ref(DEFAULT_TIMER_SECONDS)
-const useCustomWords = ref(false)
-const customA = ref('')
-const customB = ref('')
 const themesOpen = ref(false)
+
+const seatInput = useTemplateRef<HTMLInputElement>('seatInput')
 
 const undercoverCeiling = computed(() => maxUndercovers(names.value.length))
 const civilCount = computed(() => names.value.length - undercoverCount.value)
@@ -114,31 +107,13 @@ watch(() => names.value.length, (count) => {
   if (activeSeat.value >= count) activeSeat.value = count - 1
 })
 
-// Perdre le pack (déconnexion) doit refermer la saisie manuelle, sinon
-// l'écran promettrait une option que le joueur n'a plus.
-watch(() => props.diyUnlocked, (unlocked) => {
-  if (!unlocked) useCustomWords.value = false
-})
-
-/**
- * Les mots maison ne coûtent pas de crédit : ils ne demandent ni appel LLM ni
- * tirage. Le quota ne bloque donc pas ce chemin.
- */
-const customWordsReady = computed(() => {
-  const a = customA.value.trim()
-  const b = customB.value.trim()
-  return a.length > 0 && b.length > 0 && a.toLocaleLowerCase() !== b.toLocaleLowerCase()
-})
-
 const outOfCredits = computed(
-  () => props.status === 'ready' && !useCustomWords.value && (props.credits?.remaining ?? 0) === 0
+  () => props.status === 'ready' && (props.credits?.remaining ?? 0) === 0
 )
 
-const canLaunch = computed(() => {
-  if (props.status !== 'ready' || props.drawing) return false
-  if (useCustomWords.value) return customWordsReady.value
-  return (props.credits?.remaining ?? 0) > 0
-})
+const canLaunch = computed(
+  () => props.status === 'ready' && !props.drawing && (props.credits?.remaining ?? 0) > 0
+)
 
 function setPlayerCount(count: number) {
   if (count < MIN_PLAYERS || count > MAX_PLAYERS) return
@@ -146,6 +121,7 @@ function setPlayerCount(count: number) {
     names.value = [...names.value, ...Array.from({ length: count - names.value.length }, () => '')]
     // Ajouter un siège, c'est vouloir y écrire un nom tout de suite.
     activeSeat.value = names.value.length - 1
+    focusSeatInput()
   }
   else {
     names.value = names.value.slice(0, count)
@@ -162,14 +138,26 @@ function setTimer(seconds: number) {
   timerSeconds.value = seconds
 }
 
+/**
+ * Le champ de saisie reprend la main après chaque changement de siège : sans
+ * ça, il faudrait retoucher le champ à chaque nom, et le clavier du téléphone
+ * se refermerait entre deux agents.
+ */
+function focusSeatInput() {
+  void nextTick(() => seatInput.value?.focus())
+}
+
 function selectSeat(id: string) {
   const index = seats.value.findIndex(seat => seat.id === id)
-  if (index >= 0) activeSeat.value = index
+  if (index < 0) return
+  activeSeat.value = index
+  focusSeatInput()
 }
 
 /** Enchaîner les noms sans lever les yeux : le tour de table se fait au clavier. */
 function nextSeat() {
   activeSeat.value = (activeSeat.value + 1) % names.value.length
+  focusSeatInput()
 }
 
 /** Un dossier scellé referme la vitrine et bascule sur la boutique. */
@@ -186,10 +174,7 @@ function start() {
       mode: mode.value,
       timerSeconds: timerSeconds.value
     },
-    theme: submittedTheme.value,
-    custom: useCustomWords.value
-      ? { a: customA.value.trim(), b: customB.value.trim() }
-      : null
+    theme: submittedTheme.value
   })
 }
 
@@ -203,7 +188,6 @@ const inputClass
     <div class="flex flex-col items-center gap-3">
       <img :src="logoFull" alt="Undercover Infinite" class="w-64 max-w-full object-contain" >
       <p class="text-center text-body-s text-tertiary">
-        Un seul téléphone. Passez-le de main en main.<br >
         Un agent double se cache parmi vous.
       </p>
     </div>
@@ -277,7 +261,7 @@ const inputClass
         <div>
           <div class="font-display text-body-s uppercase tracking-caps text-secondary">Noms de code</div>
           <div class="mt-0.5 font-mono text-caption text-tertiary">
-            Touche un siège, écris le nom — de {{ MIN_PLAYERS }} à {{ MAX_PLAYERS }} agents.
+            Touche un siège, écris le nom · de {{ MIN_PLAYERS }} à {{ MAX_PLAYERS }} agents.
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-2">
@@ -295,6 +279,7 @@ const inputClass
           {{ String(activeSeat + 1).padStart(2, '0') }}
         </span>
         <input
+          ref="seatInput"
           v-model="names[activeSeat]"
           :class="inputClass"
           :placeholder="`Agent ${activeSeat + 1}`"
@@ -342,68 +327,40 @@ const inputClass
     </Card>
 
     <Card class="flex flex-col gap-3">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Mots de la mission</div>
-          <div class="mt-0.5 font-mono text-caption text-tertiary">
-            <template v-if="useCustomWords">Écrits par toi — aucune mission consommée.</template>
-            <template v-else>Transmis par le QG à l'ouverture de la mission.</template>
-          </div>
+      <div>
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Mots de la mission</div>
+        <div class="mt-0.5 font-mono text-caption text-tertiary">
+          Transmis par le QG à l'ouverture de la mission.
         </div>
-        <Button
-          v-if="diyUnlocked"
-          size="s"
-          :variant="useCustomWords ? 'secondary' : 'ghost'"
-          class="shrink-0"
-          @click="useCustomWords = !useCustomWords"
-        >
-          {{ useCustomWords ? 'Laisser le QG' : 'DIY' }}
-        </Button>
       </div>
 
-      <template v-if="useCustomWords">
-        <label class="flex flex-col gap-1.5">
-          <span class="font-mono text-caption uppercase tracking-caps text-tertiary">Mot des loyaux</span>
-          <input v-model="customA" :class="inputClass" type="text" maxlength="32" placeholder="Café" autocomplete="off" >
-        </label>
-        <label class="flex flex-col gap-1.5">
-          <span class="font-mono text-caption uppercase tracking-caps text-tertiary">Mot des infiltrés</span>
-          <input v-model="customB" :class="inputClass" type="text" maxlength="32" placeholder="Thé" autocomplete="off" >
-        </label>
-        <p v-if="!customWordsReady" class="font-mono text-caption text-tertiary">
-          Deux mots, proches mais différents.
+      <p v-if="status === 'loading' || status === 'idle'" class="font-mono text-caption text-tertiary">
+        Contact du QG… vérification de ton dossier.
+      </p>
+
+      <template v-else-if="status === 'error'">
+        <p class="text-body-s text-secondary">
+          Impossible de joindre le QG. Vérifie ta connexion, puis réessaie.
         </p>
+        <Button size="s" variant="ghost" class="self-start" @click="emit('retry')">
+          Réessayer
+        </Button>
       </template>
 
-      <template v-else>
-        <p v-if="status === 'loading' || status === 'idle'" class="font-mono text-caption text-tertiary">
-          Contact du QG… vérification de ton dossier.
+      <template v-else-if="credits">
+        <p v-if="outOfCredits" class="text-body-s text-secondary">
+          Tu as épuisé tes missions du jour. Elles reviennent à minuit — ou tout de suite avec un pack.
         </p>
-
-        <template v-else-if="status === 'error'">
-          <p class="text-body-s text-secondary">
-            Impossible de joindre le QG. Vérifie ta connexion, puis réessaie.
-          </p>
-          <Button size="s" variant="ghost" class="self-start" @click="emit('retry')">
-            Réessayer
-          </Button>
-        </template>
-
-        <template v-else-if="credits">
-          <p v-if="outOfCredits" class="text-body-s text-secondary">
-            Tu as épuisé tes missions du jour. Elles reviennent à minuit — ou tout de suite avec un pack.
-          </p>
-          <p v-else class="font-mono text-caption text-tertiary">
-            Missions restantes aujourd'hui : {{ credits.remaining }}
-            <template v-if="credits.wallet > 0">
-              ({{ credits.dailyRemaining }} du jour + {{ credits.wallet }} en réserve)
-            </template>
-            <template v-else>/ {{ credits.dailyLimit }}</template>
-          </p>
-          <Button v-if="outOfCredits" size="s" variant="ghost" class="self-start" @click="emit('boutique')">
-            Voir les packs
-          </Button>
-        </template>
+        <p v-else class="font-mono text-caption text-tertiary">
+          Missions restantes aujourd'hui : {{ credits.remaining }}
+          <template v-if="credits.wallet > 0">
+            ({{ credits.dailyRemaining }} du jour + {{ credits.wallet }} en réserve)
+          </template>
+          <template v-else>/ {{ credits.dailyLimit }}</template>
+        </p>
+        <Button v-if="outOfCredits" size="s" variant="ghost" class="self-start" @click="emit('boutique')">
+          Voir les packs
+        </Button>
       </template>
     </Card>
 

@@ -40,7 +40,7 @@ const CATALOG: Catalog = {
       label: 'Infinite',
       tagline: '',
       priceEur: 6.99,
-      modes: ['chrono', 'hot', 'defi', 'teams', 'pari', 'diy'],
+      modes: ['chrono', 'hot', 'defi', 'teams', 'pari'],
       allThemes: true,
       unlimited: true,
       credits: 0
@@ -50,7 +50,7 @@ const CATALOG: Catalog = {
     { id: 'classique', label: 'Classique', tagline: '', available: true },
     { id: 'hot', label: 'Hot', tagline: '', available: true, spicy: true },
     { id: 'teams', label: 'Teams', tagline: '', available: false },
-    { id: 'diy', label: 'DIY', tagline: '', available: true }
+    { id: 'pari', label: 'Pari risqué', tagline: '', available: true }
   ],
   themes: [
     { id: 'general', label: 'Tous horizons', tagline: '', generalist: true },
@@ -106,9 +106,9 @@ describe('createEntitlements', () => {
 
     await entitlements.refresh()
 
-    const diy = entitlements.modeCards.value.find(mode => mode.id === 'diy')
-    expect(diy?.unlocked).toBe(false)
-    expect(diy?.playable).toBe(false)
+    const pari = entitlements.modeCards.value.find(mode => mode.id === 'pari')
+    expect(pari?.unlocked).toBe(false)
+    expect(pari?.playable).toBe(false)
   })
 
   it('distingue « débloqué » de « jouable » pour un mode pas encore écrit', async () => {
@@ -199,7 +199,7 @@ describe('createEntitlements', () => {
         '/packs/infinite/unlock': jsonResponse({
           ...RIGHTS,
           packs: ['discover', 'infinite'],
-          modes: ['classique', 'chrono', 'hot', 'defi', 'teams', 'pari', 'diy']
+          modes: ['classique', 'chrono', 'hot', 'defi', 'teams', 'pari']
         })
       })
       const entitlements = createEntitlements({ request })
@@ -209,7 +209,7 @@ describe('createEntitlements', () => {
 
       expect(ok).toBe(true)
       expect(entitlements.packs.value).toContain('infinite')
-      expect(entitlements.modes.value).toContain('diy')
+      expect(entitlements.modes.value).toContain('pari')
     })
 
     it('remonte le message de l’API en cas de refus', async () => {

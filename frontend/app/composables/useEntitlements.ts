@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 
 export type ModeId
-  = 'classique' | 'chrono' | 'hot' | 'defi' | 'teams' | 'pari' | 'diy'
+  = 'classique' | 'chrono' | 'hot' | 'defi' | 'teams' | 'pari'
 
 export type ThemeId
   = 'general' | 'culture' | 'nature' | 'technologie'

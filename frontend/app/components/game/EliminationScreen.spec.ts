@@ -3,10 +3,11 @@ import { mount } from '@vue/test-utils'
 import EliminationScreen from './EliminationScreen.vue'
 import GameTable from './GameTable.vue'
 import Button from '../core/Button.vue'
+import RoleTag from '../core/RoleTag.vue'
 import Card from '../data-display/Card.vue'
 import type { Player } from '../../composables/useGame'
 
-const global = { components: { Button, Card, GameTable } }
+const global = { components: { Button, Card, RoleTag, GameTable } }
 
 const PLAYERS: Player[] = ['Marion', 'Karim', 'Sami', 'Léa'].map((name, i) => ({
   id: `agent-${i}`,
@@ -55,29 +56,46 @@ describe('EliminationScreen', () => {
     expect(wrapper.text()).toContain('carte retournée')
   })
 
+  it('anime le retournement du seul siège concerné', async () => {
+    const wrapper = mountScreen()
+    expect(wrapper.findAll('.seat-reveal')).toHaveLength(0)
+
+    await mainButton(wrapper).trigger('click')
+
+    expect(wrapper.findAll('.seat-reveal')).toHaveLength(1)
+  })
+
   it('retourne aussi la carte depuis le bouton', async () => {
     const wrapper = mountScreen()
     await mainButton(wrapper).trigger('click')
     expect(wrapper.text()).toContain('Passeport')
   })
 
-  /**
-   * Le cœur de la règle voulue : la carte dit le mot, jamais le camp. Un
-   * undercover grillé et un loyal grillé donnent exactement le même écran.
-   */
-  it('ne dit jamais si l’agent grillé était undercover', async () => {
+  it('annonce le camp de l’agent grillé une fois la carte retournée', async () => {
     const asUndercover = mountScreen({ role: 'undercover', word: 'Visa' })
     await mainButton(asUndercover).trigger('click')
-
-    expect(asUndercover.text()).toContain('Visa')
-    expect(asUndercover.text().toLowerCase()).not.toContain('undercover')
-    expect(asUndercover.text().toLowerCase()).not.toContain('agent double')
-    expect(asUndercover.text().toLowerCase()).not.toContain('agent loyal')
-    expect(asUndercover.text().toLowerCase()).not.toContain('infiltré')
+    expect(asUndercover.text()).toContain('Agent double')
+    expect(asUndercover.text()).toContain('Un infiltré de moins')
 
     const asCivil = mountScreen({ role: 'civil', word: 'Visa' })
     await mainButton(asCivil).trigger('click')
-    expect(asCivil.text()).toBe(asUndercover.text())
+    expect(asCivil.text()).toContain('Agent loyal')
+    expect(asCivil.text()).toContain('Erreur de jugement')
+  })
+
+  /**
+   * Le camp se dit dans le débriefing, jamais sur la carte : les deux plateaux
+   * doivent être indiscernables, sans quoi un coup d'œil à la table suffirait
+   * à répondre avant le retournement.
+   */
+  it('ne met jamais le camp sur la carte', async () => {
+    const table = async (role: 'undercover' | 'civil') => {
+      const wrapper = mountScreen({ role, word: 'Visa' })
+      await mainButton(wrapper).trigger('click')
+      return wrapper.findComponent(GameTable).text()
+    }
+
+    expect(await table('undercover')).toBe(await table('civil'))
   })
 
   it('enchaîne la manche suivante', async () => {
