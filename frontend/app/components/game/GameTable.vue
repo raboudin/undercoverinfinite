@@ -11,6 +11,12 @@ export interface TableSeat {
   state?: SeatState
   /** Carte retournée : sa face visible montre `word`. */
   faceUp?: boolean
+  /**
+   * La carte se retourne **maintenant**. Ce n'est pas `faceUp` : sur la table
+   * de vote, les cartes des manches précédentes sont face visible sans qu'il
+   * faille rejouer leur animation à chaque rendu.
+   */
+  revealing?: boolean
   word?: string | null
   disabled?: boolean
 }
@@ -66,6 +72,11 @@ const nameClass = computed(() =>
       : 'text-[9px] tracking-normal'
 )
 
+/** L'emblème du dos suit la même échelle que le reste de la carte. */
+const markClass = computed(() =>
+  layout.value.seat >= 24 ? 'text-display-s' : layout.value.seat >= 18 ? 'text-title' : 'text-body'
+)
+
 const frameClasses: Record<SeatState, string> = {
   empty: 'border-dashed border-subtle',
   idle: 'border-subtle',
@@ -104,7 +115,10 @@ function pick(seat: TableSeat) {
       v-for="{ seat, index, style } in placed"
       :key="seat.id"
       class="flip-scene absolute -translate-x-1/2 -translate-y-1/2"
-      :class="stateOf(seat) === 'eliminated' ? 'opacity-60' : ''"
+      :class="[
+        stateOf(seat) === 'eliminated' ? 'opacity-60' : '',
+        seat.revealing ? 'seat-reveal' : ''
+      ]"
       :style="style"
     >
       <component
@@ -123,15 +137,27 @@ function pick(seat: TableSeat) {
         ]"
         @click="pick(seat)"
       >
-        <!-- Face cachée : ce que voit la table. -->
-        <span class="flip-face dossier-texture flex flex-col items-center justify-between rounded-sm px-1 py-1.5">
-          <span class="font-mono text-caption leading-none text-tertiary">{{ String(index + 1).padStart(2, '0') }}</span>
+        <!-- Dos de carte : guilloché, liseré intérieur, emblème du service. -->
+        <span class="flip-face card-back flex flex-col items-center justify-between rounded-sm px-1 py-1.5">
           <span
-            class="font-display text-display-s leading-none"
-            :class="stateOf(seat) === 'eliminated' ? 'text-red-9' : 'text-ink-5'"
+            class="pointer-events-none absolute inset-[3px] rounded-[3px] border"
+            :class="stateOf(seat) === 'eliminated' ? 'border-red-9/50' : 'border-steel-1/25'"
+          />
+          <span class="relative font-mono text-caption leading-none text-tertiary">
+            {{ String(index + 1).padStart(2, '0') }}
+          </span>
+          <span
+            class="relative flex w-[42%] items-center justify-center rounded-full border font-display leading-none"
+            :class="[
+              markClass,
+              stateOf(seat) === 'eliminated'
+                ? 'border-red-9/60 text-red-9'
+                : 'border-steel-1/35 text-steel-1'
+            ]"
+            style="aspect-ratio: 1"
           >∞</span>
           <span
-            class="w-full truncate text-center font-display uppercase"
+            class="relative w-full truncate text-center font-display uppercase"
             :class="[
               nameClass,
               stateOf(seat) === 'empty' ? 'text-tertiary' : 'text-secondary',
@@ -141,8 +167,11 @@ function pick(seat: TableSeat) {
         </span>
 
         <!-- Face révélée : le mot, jamais le rôle. -->
-        <span class="flip-face flip-face--back flex flex-col items-center justify-between rounded-sm bg-ink-3 px-1 py-1.5">
-          <span class="font-mono text-caption leading-none text-tertiary">{{ String(index + 1).padStart(2, '0') }}</span>
+        <span class="flip-face flip-face--back card-face flex flex-col items-center justify-between rounded-sm px-1 py-1.5">
+          <span class="pointer-events-none absolute inset-[3px] rounded-[3px] border border-red-9/45" />
+          <span class="relative font-mono text-caption leading-none text-tertiary">
+            {{ String(index + 1).padStart(2, '0') }}
+          </span>
           <!--
             `v-if` et pas seulement la rotation CSS : `backface-visibility`
             cache la face au regard, pas au DOM. Sans ça le mot serait lisible
@@ -151,13 +180,13 @@ function pick(seat: TableSeat) {
           -->
           <span
             v-if="seat.faceUp"
-            class="line-clamp-3 px-0.5 text-center font-display uppercase leading-tight tracking-caps text-primary"
+            class="relative line-clamp-3 px-0.5 text-center font-display uppercase leading-tight tracking-caps text-primary"
             :class="wordClass"
           >{{ seat.word }}</span>
           <!-- Cale : la face garde ses trois lignes, donc sa répartition. -->
           <span v-else />
           <span
-            class="w-full truncate text-center font-display uppercase text-tertiary"
+            class="relative w-full truncate text-center font-display uppercase text-tertiary"
             :class="[nameClass, stateOf(seat) === 'eliminated' ? 'line-through' : '']"
           >{{ seat.name || '—' }}</span>
         </span>

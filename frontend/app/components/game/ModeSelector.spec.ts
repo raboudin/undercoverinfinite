@@ -29,11 +29,14 @@ describe('ModeSelector', () => {
     expect(wrapper.text()).toContain('L’originale.')
   })
 
-  /** Un emplacement d'illustration par mode, en cartouche tant qu'il est vide. */
-  it('réserve un visuel à chaque mode', () => {
-    const slots = selector().findAllComponents(ArtSlot)
-    expect(slots).toHaveLength(3)
-    expect(slots.map(slot => slot.text())).toEqual(['CL', 'HO', 'TE'])
+  it('donne son illustration à chaque mode', () => {
+    const wrapper = selector()
+
+    expect(wrapper.findAllComponents(ArtSlot)).toHaveLength(3)
+    const sources = wrapper.findAll('img').map(img => img.attributes('src'))
+    expect(sources[0]).toContain('modes/classique')
+    expect(sources[1]).toContain('modes/hot')
+    expect(sources[2]).toContain('modes/teams')
   })
 
   it('marque le mode courant', () => {

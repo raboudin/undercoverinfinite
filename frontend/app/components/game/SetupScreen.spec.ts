@@ -271,8 +271,7 @@ describe('SetupScreen — lancement', () => {
       [
         {
           config: { names, undercoverCount: 1, mode: 'classique', timerSeconds: 30 },
-          theme: 'general',
-          custom: null
+          theme: 'general'
         }
       ]
     ])
@@ -369,66 +368,6 @@ describe('SetupScreen — lancement', () => {
     expect(wrapper.text()).toContain('Le mode Hot demande un pack.')
     await buttonNamed(wrapper, 'Voir les packs').trigger('click')
     expect(wrapper.emitted('boutique')).toHaveLength(1)
-  })
-})
-
-describe('SetupScreen — DIY', () => {
-  it('ne propose la saisie manuelle qu’avec le pack', async () => {
-    expect((await atTable()).text()).not.toContain('DIY')
-    expect((await atTable({ diyUnlocked: true })).text()).toContain('DIY')
-  })
-
-  /** Ouvre la saisie manuelle et rend le wrapper. */
-  async function withCustomWords(props: Record<string, unknown> = {}) {
-    const wrapper = await atTable({ diyUnlocked: true, ...props })
-    await buttonNamed(wrapper, 'DIY').trigger('click')
-    return wrapper
-  }
-
-  it('exige deux mots différents avant de lancer', async () => {
-    const wrapper = await withCustomWords()
-    expect(launchButton(wrapper).attributes('disabled')).toBeDefined()
-
-    const custom = wrapper.findAll('input[type="text"]').slice(-2)
-    await custom[0]!.setValue('Café')
-    await custom[1]!.setValue('café')
-    expect(launchButton(wrapper).attributes('disabled')).toBeDefined()
-
-    await custom[1]!.setValue('Thé')
-    expect(launchButton(wrapper).attributes('disabled')).toBeUndefined()
-  })
-
-  it('émet les mots saisis et annonce qu’aucune mission n’est consommée', async () => {
-    const wrapper = await withCustomWords()
-    const custom = wrapper.findAll('input[type="text"]').slice(-2)
-    await custom[0]!.setValue(' Café ')
-    await custom[1]!.setValue('Thé')
-
-    expect(wrapper.text()).toContain('aucune mission consommée')
-    await launchButton(wrapper).trigger('click')
-
-    const [[submission]] = wrapper.emitted('start') as [{ custom: unknown }][]
-    expect(submission.custom).toEqual({ a: 'Café', b: 'Thé' })
-  })
-
-  it('reste lançable sans crédit : la saisie manuelle n’en coûte pas', async () => {
-    const wrapper = await withCustomWords({
-      credits: { ...CREDITS, dailyRemaining: 0, remaining: 0 }
-    })
-    const custom = wrapper.findAll('input[type="text"]').slice(-2)
-    await custom[0]!.setValue('Café')
-    await custom[1]!.setValue('Thé')
-
-    expect(launchButton(wrapper).attributes('disabled')).toBeUndefined()
-  })
-
-  it('referme la saisie manuelle si le pack est perdu', async () => {
-    const wrapper = await withCustomWords()
-    expect(wrapper.text()).toContain('Mot des loyaux')
-
-    await wrapper.setProps({ diyUnlocked: false })
-
-    expect(wrapper.text()).not.toContain('Mot des loyaux')
   })
 })
 

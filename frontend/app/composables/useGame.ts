@@ -53,9 +53,10 @@ export const MIN_TIMER_SECONDS = 10
 export const MAX_TIMER_SECONDS = 120
 
 /**
- * Les civils doivent être strictement majoritaires au lancement : à parité la
- * condition de victoire des undercovers serait déjà remplie et la partie
- * s'arrêterait avant le premier tour.
+ * Les civils restent strictement majoritaires au lancement. Ce n'est plus une
+ * question de règle — à parité la partie tiendrait encore, puisque les
+ * undercovers ne gagnent qu'en étant *plus nombreux* — mais d'intérêt : une
+ * table qui démarre à égalité se joue sur une seule élimination.
  */
 export function maxUndercovers(playerCount: number): number {
   return Math.floor((playerCount - 1) / 2)
@@ -294,6 +295,11 @@ export function createGame(options: { rng?: () => number } = {}) {
     return true
   }
 
+  /**
+   * Deux fins possibles, et deux seulement : plus aucun undercover en vie, ou
+   * des undercovers **strictement plus nombreux** que les loyaux. À égalité la
+   * partie continue — c'est ce qui laisse une dernière manche en tête-à-tête.
+   */
   function resolveElimination() {
     if (phase.value !== 'elimination') return
     if (aliveUndercovers.value === 0) {
@@ -301,7 +307,7 @@ export function createGame(options: { rng?: () => number } = {}) {
       phase.value = 'victory'
       return
     }
-    if (aliveUndercovers.value >= aliveCivils.value) {
+    if (aliveUndercovers.value > aliveCivils.value) {
       winner.value = 'undercovers'
       phase.value = 'victory'
       return

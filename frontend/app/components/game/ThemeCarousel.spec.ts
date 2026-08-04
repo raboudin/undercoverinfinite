@@ -74,11 +74,9 @@ describe('ThemeCarousel — affichage', () => {
     expect(dialog()).toContain('3 / 3')
   })
 
-  /** L'emplacement plein écran existe déjà, en cartouche tant qu'il est vide. */
-  it('réserve la place du visuel plein écran', () => {
+  it('affiche le visuel plein écran du dossier', () => {
     carousel()
-    expect(document.body.querySelector('img')).toBeNull()
-    expect(dialog()).toContain('TH')
+    expect(document.body.querySelector('img')?.getAttribute('src')).toContain('themes/general')
   })
 })
 

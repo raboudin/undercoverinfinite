@@ -22,7 +22,7 @@ d'écran.
 
 Ce sont ceux que sert l'API (`GET /packs`), pas des noms libres.
 
-- **Modes** (`modes/`) : `classique`, `chrono`, `hot`, `defi`, `teams`, `pari`, `diy`
+- **Modes** (`modes/`) : `classique`, `chrono`, `hot`, `defi`, `teams`, `pari`
 - **Thèmes** (`themes/` et `themes/thumbs/`) : `general`, `culture`, `nature`,
   `technologie`, `personnalites`, `pop-culture`, `football`, `pays-etats`,
   `histoire-arts`

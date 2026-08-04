@@ -53,13 +53,27 @@ describe('RevealScreen', () => {
     expect(enabled).toEqual([false, true, false, false])
   })
 
-  it('retourne la carte au geste sur la table', async () => {
+  it('retourne la carte au geste sur la table, dans les deux sens', async () => {
     const wrapper = mountScreen()
+    const card = () => wrapper.findComponent(GameTable).findAll('button')[0]!
 
-    await wrapper.findComponent(GameTable).findAll('button')[0]!.trigger('click')
-
+    await card().trigger('click')
     expect(wrapper.findAll('.flip-card--up')).toHaveLength(1)
     expect(wrapper.text()).toContain('Passeport')
+
+    // La même pression referme : sinon on passerait le téléphone mot découvert.
+    await card().trigger('click')
+    expect(wrapper.findAll('.flip-card--up')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('Passeport')
+  })
+
+  it('anime le retournement du siège en poste', async () => {
+    const wrapper = mountScreen()
+    expect(wrapper.findAll('.seat-reveal')).toHaveLength(0)
+
+    await mainButton(wrapper).trigger('click')
+
+    expect(wrapper.findAll('.seat-reveal')).toHaveLength(1)
   })
 
   it('retourne aussi la carte depuis le bouton', async () => {

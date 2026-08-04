@@ -22,9 +22,17 @@ describe('ThemeButton', () => {
     expect(wrapper.text()).toContain('Livres, musique, scène et traditions.')
   })
 
-  /** Les vignettes arrivent plus tard : en attendant, un cartouche, pas un 404. */
-  it('tient sa place sans vignette', () => {
+  it('affiche la vignette du dossier', () => {
     const wrapper = mount(ThemeButton, { props: { theme: CULTURE }, global })
+    expect(wrapper.get('img').attributes('src')).toContain('thumbs/culture')
+  })
+
+  /** Un thème sans vignette déposée tient sa place avec un cartouche, pas un 404. */
+  it('retombe sur un cartouche quand la vignette manque', () => {
+    const wrapper = mount(ThemeButton, {
+      props: { theme: { ...CULTURE, id: 'inexistant' as typeof CULTURE.id, label: 'Culture' } },
+      global
+    })
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.findComponent(ArtSlot).text()).toBe('CU')
   })

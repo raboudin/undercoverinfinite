@@ -288,13 +288,26 @@ describe('createGame — conditions de victoire', () => {
     expect(game.aliveUndercovers.value).toBe(0)
   })
 
-  it('donne la victoire aux undercovers dès qu’ils atteignent la parité', () => {
-    // 5 agents / 2 undercovers : un civil éliminé suffit à faire 2 contre 2.
+  /** À égalité la partie tient encore : c'est la manche en tête-à-tête. */
+  it('laisse la partie ouverte quand les camps s’égalisent', () => {
+    // 5 agents / 2 undercovers : un civil éliminé fait 2 contre 2.
     const game = newGame(['Marion', 'Karim', 'Sami', 'Léa', 'Youssef'], 2)
     finishReveal(game)
     playRoundAndEliminate(game, 'civil')
 
     expect(game.aliveCivils.value).toBe(2)
+    expect(game.aliveUndercovers.value).toBe(2)
+    expect(game.winner.value).toBeNull()
+    expect(game.phase.value).toBe('describe')
+  })
+
+  it('ne donne la victoire aux undercovers qu’en supériorité', () => {
+    const game = newGame(['Marion', 'Karim', 'Sami', 'Léa', 'Youssef'], 2)
+    finishReveal(game)
+    playRoundAndEliminate(game, 'civil')
+    playRoundAndEliminate(game, 'civil')
+
+    expect(game.aliveCivils.value).toBe(1)
     expect(game.aliveUndercovers.value).toBe(2)
     expect(game.winner.value).toBe('undercovers')
     expect(game.phase.value).toBe('victory')

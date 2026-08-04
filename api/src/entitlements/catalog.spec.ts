@@ -51,7 +51,6 @@ describe('resolveAccess', () => {
       'defi',
       'teams',
       'pari',
-      'diy',
     ]);
     expect(access.themes).toEqual([...THEME_IDS]);
   });

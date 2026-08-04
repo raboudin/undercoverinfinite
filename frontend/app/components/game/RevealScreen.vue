@@ -33,10 +33,20 @@ const seats = computed<TableSeat[]>(() =>
     name: item.name,
     state: seat === props.index ? 'active' : 'idle',
     faceUp: seat === props.index && revealed.value,
+    revealing: seat === props.index && revealed.value,
     word: seat === props.index ? item.word : null,
     disabled: seat !== props.index
   }))
 )
+
+/**
+ * La carte se retourne dans les deux sens : on l'ouvre d'une pression, on la
+ * referme de la même. Ouvrir sans pouvoir refermer obligerait à passer le
+ * téléphone mot découvert.
+ */
+function toggle() {
+  revealed.value = !revealed.value
+}
 
 function open() {
   revealed.value = true
@@ -60,7 +70,7 @@ function pass() {
       selectable
       :selected-id="player.id"
       action-label="Retourner la carte de"
-      @select="open"
+      @select="toggle"
     >
       <div class="font-display text-body uppercase tracking-caps text-primary">{{ player.name }}</div>
       <div class="mt-1 font-mono text-caption leading-snug text-tertiary">

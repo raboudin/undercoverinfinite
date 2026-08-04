@@ -18,7 +18,6 @@ export const MODE_IDS = [
   'defi',
   'teams',
   'pari',
-  'diy',
 ] as const;
 
 export type ModeId = (typeof MODE_IDS)[number];
@@ -75,12 +74,6 @@ export const MODES: Record<ModeId, ModeDefinition> = {
     label: 'Pari risqué',
     tagline:
       'Chacun mise sur un suspect. L’app tient les comptes, rien de plus.',
-    available: true,
-  },
-  diy: {
-    id: 'diy',
-    label: 'DIY',
-    tagline: 'Tu choisis le mode et tu écris toi-même les deux mots.',
     available: true,
   },
 };
@@ -299,7 +292,7 @@ export const PACKS: Record<PackId, PackDefinition> = {
     label: 'Infinite',
     tagline: 'Tous les modes, tous les thèmes, sans rien à rouvrir.',
     priceEur: 6.99,
-    modes: ['chrono', 'hot', 'defi', 'teams', 'pari', 'diy'],
+    modes: ['chrono', 'hot', 'defi', 'teams', 'pari'],
     allThemes: true,
     unlimited: true,
     credits: 0,
