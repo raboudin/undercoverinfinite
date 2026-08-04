@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { isUniqueViolation } from '../prisma/prisma.errors';
 import type {
   AuthResult,
   OAuthProfile,
@@ -42,15 +43,6 @@ function dummyHash(): Promise<string> {
 /** Les emails sont comparés et stockés en minuscules, sans espaces autour. */
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
-}
-
-/** Violation de contrainte unique côté Prisma. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: unknown }).code === 'P2002'
-  );
 }
 
 function toPublicUser(user: UserRow): PublicUser {
