@@ -1,10 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  HttpException,
-  HttpStatus,
-  Injectable,
-} from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { isUniqueViolation } from '../prisma/prisma.errors';
 import {
@@ -21,11 +15,11 @@ import {
   type PackId,
   type ThemeId,
 } from './catalog';
-import { dayDate, nextDayKey, todayKey } from './day';
+import { nextDayKey, todayKey } from './day';
 import type { Subject } from './subject';
 
 export interface CreditsDto {
-  /** Quota du jour (5, ou 50 avec un pack illimité). */
+  /** Conservé pour l'affichage : n'est plus une borne réelle, voir `unlimited`. */
   dailyLimit: number;
   dailyUsed: number;
   dailyRemaining: number;
@@ -62,17 +56,6 @@ export interface CatalogDto {
   unlimitedDailyCredits: number;
 }
 
-/**
- * 402 : la requête est légitime, il ne reste simplement plus de crédit. Un 403
- * la confondrait avec « ce mode n'est pas débloqué », que le front doit traiter
- * autrement (proposer la boutique vs. proposer d'attendre demain).
- */
-export class NoCreditsException extends HttpException {
-  constructor(message: string) {
-    super(message, HttpStatus.PAYMENT_REQUIRED);
-  }
-}
-
 /** Quelle réserve a été débitée — la seule chose que sait rembourser `refundCredit`. */
 export type CreditSource = 'daily' | 'wallet';
 
@@ -105,25 +88,21 @@ export class EntitlementsService {
     };
   }
 
-  /** Droits et crédits d'un sujet — la réponse de `GET /entitlements`. */
+  /**
+   * Droits et crédits d'un sujet — la réponse de `GET /entitlements`. Plus de
+   * plafond quotidien à consulter : `dailyUsed` reste à 0, `dailyRemaining`
+   * vaut toujours `dailyLimit`. Le solde acheté reste affiché, lui, puisqu'un
+   * pack de recharge continue de le créditer.
+   */
   async resolve(subject: Subject): Promise<EntitlementsDto> {
     const packs = await this.packsOf(subject);
     const access = resolveAccess({ hasAccount: !!subject.userId, packs });
-    const day = todayKey();
 
-    const [usage, wallet] = await Promise.all([
-      this.prisma.dailyUsage.findUnique({
-        where: { subject_day: { subject: subject.key, day: dayDate(day) } },
-      }),
-      subject.userId
-        ? this.prisma.creditWallet.findUnique({
-            where: { userId: subject.userId },
-          })
-        : null,
-    ]);
-
-    const dailyUsed = usage?.used ?? 0;
-    const dailyRemaining = Math.max(access.dailyLimit - dailyUsed, 0);
+    const wallet = subject.userId
+      ? await this.prisma.creditWallet.findUnique({
+          where: { userId: subject.userId },
+        })
+      : null;
     const walletBalance = wallet?.balance ?? 0;
 
     return {
@@ -133,12 +112,12 @@ export class EntitlementsService {
       themes: access.themes,
       credits: {
         dailyLimit: access.dailyLimit,
-        dailyUsed,
-        dailyRemaining,
+        dailyUsed: 0,
+        dailyRemaining: access.dailyLimit,
         wallet: walletBalance,
-        remaining: dailyRemaining + walletBalance,
+        remaining: access.dailyLimit + walletBalance,
         unlimited: access.unlimited,
-        resetsOn: nextDayKey(day),
+        resetsOn: nextDayKey(todayKey()),
       },
     };
   }
@@ -176,59 +155,20 @@ export class EntitlementsService {
   }
 
   /**
-   * Débite une partie : le quota du jour d'abord, le solde acheté ensuite.
-   *
-   * Cet ordre est ce qui empêche une recharge de fondre en même temps que des
-   * crédits gratuits — dépenser d'abord ce qui expire de toute façon ce soir.
+   * Sert une partie. Plus de plafond quotidien ni de solde à décrémenter :
+   * `resolveAccess` renvoie désormais `unlimited: true` pour tout le monde, il
+   * n'y a donc plus rien à débiter ni à comparer à une borne.
    */
   async consumeCredit(subject: Subject): Promise<CreditSpend> {
-    const packs = await this.packsOf(subject);
-    const access = resolveAccess({ hasAccount: !!subject.userId, packs });
-    const day = dayDate(todayKey());
-
-    let from: CreditSource | null = null;
-    if (await this.spendDaily(subject.key, day, access.dailyLimit)) {
-      from = 'daily';
-    } else if (subject.userId && (await this.spendWallet(subject.userId))) {
-      from = 'wallet';
-    }
-
-    if (!from) {
-      throw new NoCreditsException(
-        subject.userId
-          ? 'Tu as épuisé tes parties du jour. Elles reviennent à minuit, ou tout de suite avec une recharge.'
-          : 'Tu as épuisé tes parties du jour. Elles reviennent à minuit — un compte d’agent en débloque davantage.',
-      );
-    }
-
-    return { from, credits: (await this.resolve(subject)).credits };
+    return { from: 'daily', credits: (await this.resolve(subject)).credits };
   }
 
   /**
-   * Rend le crédit débité quand la partie n'a finalement pas pu être servie
-   * (LLM injoignable, par exemple). Le crédit est pris **avant** la génération
-   * pour que la contrainte de quota reste atomique ; sans ce retour arrière,
-   * une panne du fournisseur coûterait des parties au joueur.
+   * Rien n'est débité par `consumeCredit`, donc rien à rendre ici. Gardée pour
+   * que `WordsService` n'ait pas besoin de changer de contrat si un échec de
+   * tirage se produit en aval.
    */
-  async refundCredit(subject: Subject, from: CreditSource): Promise<void> {
-    if (from === 'wallet' && subject.userId) {
-      await this.prisma.creditWallet.updateMany({
-        where: { userId: subject.userId },
-        data: { balance: { increment: 1 } },
-      });
-      return;
-    }
-    // `used > 0` : un remboursement ne doit jamais créditer au-delà du quota,
-    // par exemple si le compteur a été remis à zéro entre-temps (minuit).
-    await this.prisma.dailyUsage.updateMany({
-      where: {
-        subject: subject.key,
-        day: dayDate(todayKey()),
-        used: { gt: 0 },
-      },
-      data: { used: { decrement: 1 } },
-    });
-  }
+  async refundCredit(_subject: Subject, _from: CreditSource): Promise<void> {}
 
   /**
    * Débloque un pack pour un compte. Gratuit aujourd'hui, d'où le déblocage
@@ -270,51 +210,5 @@ export class EntitlementsService {
       select: { pack: true },
     });
     return knownPacks(rows.map((row) => row.pack));
-  }
-
-  /**
-   * Incrémente le compteur du jour tant qu'il reste sous le plafond.
-   *
-   * `updateMany` avec la borne dans le `where` fait office de compare-and-swap :
-   * deux parties lancées en même temps ne peuvent pas franchir le plafond
-   * ensemble, là où un `findUnique` puis `update` le permettrait.
-   */
-  private async spendDaily(
-    subject: string,
-    day: Date,
-    limit: number,
-  ): Promise<boolean> {
-    const bump = () =>
-      this.prisma.dailyUsage.updateMany({
-        where: { subject, day, used: { lt: limit } },
-        data: { used: { increment: 1 } },
-      });
-
-    if ((await bump()).count > 0) return true;
-
-    // Zéro ligne touchée : soit le plafond est atteint, soit il n'y a pas
-    // encore de ligne pour aujourd'hui. Seul le second cas est rattrapable.
-    const existing = await this.prisma.dailyUsage.findUnique({
-      where: { subject_day: { subject, day } },
-    });
-    if (existing) return false;
-
-    try {
-      await this.prisma.dailyUsage.create({ data: { subject, day, used: 1 } });
-      return true;
-    } catch (error) {
-      if (!isUniqueViolation(error)) throw error;
-      // Une requête concurrente a créé la ligne entre-temps : on rejoue le CAS.
-      return (await bump()).count > 0;
-    }
-  }
-
-  /** Même compare-and-swap sur le solde acheté : jamais de solde négatif. */
-  private async spendWallet(userId: string): Promise<boolean> {
-    const updated = await this.prisma.creditWallet.updateMany({
-      where: { userId, balance: { gt: 0 } },
-      data: { balance: { decrement: 1 } },
-    });
-    return updated.count > 0;
   }
 }

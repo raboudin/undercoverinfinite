@@ -130,7 +130,7 @@ describe('Entitlements (e2e)', () => {
         'nature',
         'technologie',
       ]);
-      expect(body.credits.dailyLimit).toBe(5);
+      expect(body.credits.unlimited).toBe(true);
     });
 
     it('refuse de rattacher un pack', async () => {
@@ -181,7 +181,7 @@ describe('Entitlements (e2e)', () => {
       const body = res.body as EntitlementsBody;
       expect(body.account).toBe(true);
       expect(body.modes).toEqual(['classique', 'chrono']);
-      expect(body.credits.dailyLimit).toBe(5);
+      expect(body.credits.unlimited).toBe(true);
       expect(body.credits.wallet).toBe(0);
     });
 

@@ -208,12 +208,12 @@ export const DEFAULT_THEME: ThemeId = 'general';
 /* Crédits                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** Un crédit = une partie, quel que soit le nombre de mots qu'elle demande. */
-export const FREE_DAILY_CREDITS = 5;
-
 /**
- * Les packs dits « illimités » restent plafonnés : sans cette borne, un seul
- * compte pourrait déclencher un nombre non borné d'appels LLM.
+ * Un crédit = une partie, quel que soit le nombre de mots qu'elle demande.
+ * Il n'y a plus de plafond quotidien : `resolveAccess` renvoie désormais
+ * `unlimited: true` pour tout le monde. Cette constante ne sert plus qu'à
+ * peupler `dailyLimit` dans les réponses, pour ne pas casser le contrat des
+ * clients qui l'affichent encore.
  */
 export const UNLIMITED_DAILY_CREDITS = 50;
 
@@ -306,7 +306,7 @@ export const PACKS: Record<PackId, PackDefinition> = {
 export interface ResolvedAccess {
   modes: ModeId[];
   themes: ThemeId[];
-  /** Quota quotidien, relevé si un pack illimité est détenu. */
+  /** Conservé pour l'affichage : n'est plus une borne réelle, voir `unlimited`. */
   dailyLimit: number;
   unlimited: boolean;
 }
@@ -344,13 +344,14 @@ export function resolveAccess(options: {
 
   const allThemes =
     options.hasAccount && definitions.some((pack) => pack.allThemes);
-  const unlimited =
-    options.hasAccount && definitions.some((pack) => pack.unlimited);
 
+  // Plus de limite journalière : tout le monde joue à volonté, compte ou non,
+  // pack ou non. Le champ `dailyLimit` ne borne plus rien, il ne sert plus
+  // qu'à un affichage éventuel du barème historique.
   return {
     modes: MODE_IDS.filter((id) => modes.has(id)),
     themes: allThemes ? [...THEME_IDS] : [...GENERALIST_THEMES],
-    dailyLimit: unlimited ? UNLIMITED_DAILY_CREDITS : FREE_DAILY_CREDITS,
-    unlimited,
+    dailyLimit: UNLIMITED_DAILY_CREDITS,
+    unlimited: true,
   };
 }
