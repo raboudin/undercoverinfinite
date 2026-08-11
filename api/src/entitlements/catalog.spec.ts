@@ -1,28 +1,25 @@
 import {
-  FREE_DAILY_CREDITS,
   GENERALIST_THEMES,
   MODES,
   THEME_IDS,
-  UNLIMITED_DAILY_CREDITS,
   knownPacks,
   resolveAccess,
 } from './catalog';
 
 describe('resolveAccess', () => {
-  it('sans compte : le mode classique seul, thèmes généralistes, quota gratuit', () => {
+  it('sans compte : le mode classique seul, thèmes généralistes, crédits illimités', () => {
     const access = resolveAccess({ hasAccount: false, packs: [] });
 
     expect(access.modes).toEqual(['classique']);
     expect(access.themes).toEqual(GENERALIST_THEMES);
-    expect(access.dailyLimit).toBe(FREE_DAILY_CREDITS);
-    expect(access.unlimited).toBe(false);
+    expect(access.unlimited).toBe(true);
   });
 
-  it('avec un compte : le chrono s’ajoute, le quota ne bouge pas', () => {
+  it('avec un compte : le chrono s’ajoute, les crédits restent illimités', () => {
     const access = resolveAccess({ hasAccount: true, packs: [] });
 
     expect(access.modes).toEqual(['classique', 'chrono']);
-    expect(access.dailyLimit).toBe(FREE_DAILY_CREDITS);
+    expect(access.unlimited).toBe(true);
   });
 
   it('discover : chrono et hot, mais toujours les seuls thèmes généralistes', () => {
@@ -31,7 +28,6 @@ describe('resolveAccess', () => {
     expect(access.modes).toEqual(['classique', 'chrono', 'hot']);
     expect(access.themes).toEqual(GENERALIST_THEMES);
     expect(access.unlimited).toBe(true);
-    expect(access.dailyLimit).toBe(UNLIMITED_DAILY_CREDITS);
   });
 
   it('diamond : le défi et tous les thèmes', () => {
@@ -75,14 +71,6 @@ describe('resolveAccess', () => {
 
     expect(withPack.modes).toEqual(without.modes);
     expect(withPack.themes).toEqual(without.themes);
-    expect(withPack.dailyLimit).toBe(FREE_DAILY_CREDITS);
-  });
-
-  it('le pack illimité relève le quota sans ouvrir de mode', () => {
-    const access = resolveAccess({ hasAccount: true, packs: ['unlimited'] });
-
-    expect(access.dailyLimit).toBe(UNLIMITED_DAILY_CREDITS);
-    expect(access.modes).toEqual(['classique', 'chrono']);
   });
 
   it('un pack sans compte ne donne rien : c’est le compte qui le porte', () => {
@@ -90,7 +78,6 @@ describe('resolveAccess', () => {
 
     expect(access.modes).toEqual(['classique']);
     expect(access.themes).toEqual(GENERALIST_THEMES);
-    expect(access.dailyLimit).toBe(FREE_DAILY_CREDITS);
   });
 
   it('teams est vendu mais pas encore jouable', () => {
