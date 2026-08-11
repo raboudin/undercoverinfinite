@@ -1,11 +1,7 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
-import { FREE_DAILY_CREDITS, UNLIMITED_DAILY_CREDITS } from './catalog';
-import { dayDate, todayKey } from './day';
-import {
-  EntitlementsService,
-  NoCreditsException,
-} from './entitlements.service';
+import { UNLIMITED_DAILY_CREDITS } from './catalog';
+import { EntitlementsService } from './entitlements.service';
 import { userSubject, type Subject } from './subject';
 
 const ANON: Subject = { key: 'device:abc', userId: null };
@@ -19,11 +15,6 @@ function uniqueViolation() {
 describe('EntitlementsService', () => {
   let prisma: {
     entitlement: { findMany: jest.Mock; create: jest.Mock };
-    dailyUsage: {
-      findUnique: jest.Mock;
-      updateMany: jest.Mock;
-      create: jest.Mock;
-    };
     creditWallet: {
       findUnique: jest.Mock;
       updateMany: jest.Mock;
@@ -38,11 +29,6 @@ describe('EntitlementsService', () => {
       entitlement: {
         findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn(),
-      },
-      dailyUsage: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-        create: jest.fn().mockResolvedValue({}),
       },
       creditWallet: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -62,32 +48,29 @@ describe('EntitlementsService', () => {
   }
 
   describe('resolve', () => {
-    it('rend le quota gratuit et aucun pack à un anonyme', async () => {
+    it('rend des crédits illimités et aucun pack à un anonyme', async () => {
       const result = await service.resolve(ANON);
 
       expect(result.account).toBe(false);
       expect(result.packs).toEqual([]);
-      expect(result.credits.dailyLimit).toBe(FREE_DAILY_CREDITS);
-      expect(result.credits.remaining).toBe(FREE_DAILY_CREDITS);
+      expect(result.credits.unlimited).toBe(true);
+      expect(result.credits.dailyUsed).toBe(0);
       // Aucune lecture de portefeuille sans compte : il n'y en a pas.
       expect(prisma.creditWallet.findUnique).not.toHaveBeenCalled();
     });
 
-    it('déduit la consommation du jour et ajoute le solde acheté', async () => {
-      prisma.dailyUsage.findUnique.mockResolvedValue({ used: 3 });
+    it('ajoute le solde acheté au quota, désormais toujours illimité', async () => {
       prisma.creditWallet.findUnique.mockResolvedValue({ balance: 7 });
 
       const result = await service.resolve(ACCOUNT);
 
-      expect(result.credits.dailyUsed).toBe(3);
-      expect(result.credits.dailyRemaining).toBe(FREE_DAILY_CREDITS - 3);
       expect(result.credits.wallet).toBe(7);
-      expect(result.credits.remaining).toBe(FREE_DAILY_CREDITS - 3 + 7);
+      expect(result.credits.remaining).toBe(
+        UNLIMITED_DAILY_CREDITS + 7,
+      );
     });
 
-    it('relève le plafond avec un pack illimité', async () => {
-      ownsPacks('infinite');
-
+    it('reste illimité même sans aucun pack', async () => {
       const result = await service.resolve(ACCOUNT);
 
       expect(result.credits.dailyLimit).toBe(UNLIMITED_DAILY_CREDITS);
@@ -138,104 +121,28 @@ describe('EntitlementsService', () => {
   });
 
   describe('consumeCredit', () => {
-    it('débite le quota du jour en priorité', async () => {
-      prisma.dailyUsage.updateMany.mockResolvedValue({ count: 1 });
-      prisma.creditWallet.findUnique.mockResolvedValue({ balance: 5 });
-
+    it('sert toujours la partie, sans jamais toucher le portefeuille', async () => {
       const spend = await service.consumeCredit(ACCOUNT);
 
       expect(spend.from).toBe('daily');
-      // Le solde acheté ne doit pas fondre tant qu'il reste du gratuit.
+      expect(spend.credits.unlimited).toBe(true);
       expect(prisma.creditWallet.updateMany).not.toHaveBeenCalled();
     });
 
-    it('crée la ligne du jour au premier crédit', async () => {
-      prisma.dailyUsage.updateMany.mockResolvedValue({ count: 0 });
-      prisma.dailyUsage.findUnique.mockResolvedValue(null);
-
+    it('sert aussi un anonyme sans jamais le bloquer', async () => {
       const spend = await service.consumeCredit(ANON);
 
       expect(spend.from).toBe('daily');
-      expect(prisma.dailyUsage.create).toHaveBeenCalledWith({
-        data: { subject: 'device:abc', day: dayDate(todayKey()), used: 1 },
-      });
-    });
-
-    it('bascule sur le solde acheté quand le quota est épuisé', async () => {
-      prisma.dailyUsage.updateMany.mockResolvedValue({ count: 0 });
-      prisma.dailyUsage.findUnique.mockResolvedValue({
-        used: FREE_DAILY_CREDITS,
-      });
-      prisma.creditWallet.updateMany.mockResolvedValue({ count: 1 });
-
-      const spend = await service.consumeCredit(ACCOUNT);
-
-      expect(spend.from).toBe('wallet');
-      expect(prisma.creditWallet.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'user-1', balance: { gt: 0 } },
-        data: { balance: { decrement: 1 } },
-      });
-    });
-
-    it('répond 402 quand quota et solde sont vides', async () => {
-      prisma.dailyUsage.updateMany.mockResolvedValue({ count: 0 });
-      prisma.dailyUsage.findUnique.mockResolvedValue({
-        used: FREE_DAILY_CREDITS,
-      });
-      prisma.creditWallet.updateMany.mockResolvedValue({ count: 0 });
-
-      await expect(service.consumeCredit(ACCOUNT)).rejects.toThrow(
-        NoCreditsException,
-      );
-    });
-
-    it('n’essaie pas le portefeuille d’un anonyme', async () => {
-      prisma.dailyUsage.updateMany.mockResolvedValue({ count: 0 });
-      prisma.dailyUsage.findUnique.mockResolvedValue({
-        used: FREE_DAILY_CREDITS,
-      });
-
-      await expect(service.consumeCredit(ANON)).rejects.toThrow(
-        NoCreditsException,
-      );
-      expect(prisma.creditWallet.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('rejoue le compare-and-swap si une requête concurrente a créé la ligne', async () => {
-      prisma.dailyUsage.updateMany
-        .mockResolvedValueOnce({ count: 0 }) // pas de ligne encore
-        .mockResolvedValueOnce({ count: 1 }); // rejoué après la course
-      prisma.dailyUsage.findUnique.mockResolvedValue(null);
-      prisma.dailyUsage.create.mockRejectedValue(uniqueViolation());
-
-      const spend = await service.consumeCredit(ANON);
-
-      expect(spend.from).toBe('daily');
-      expect(prisma.dailyUsage.updateMany).toHaveBeenCalledTimes(2);
+      expect(spend.credits.remaining).toBeGreaterThan(0);
     });
   });
 
   describe('refundCredit', () => {
-    it('rend un crédit quotidien sans jamais passer sous zéro', async () => {
+    it('ne touche plus rien : rien n’a été débité par consumeCredit', async () => {
       await service.refundCredit(ANON, 'daily');
-
-      expect(prisma.dailyUsage.updateMany).toHaveBeenCalledWith({
-        where: {
-          subject: 'device:abc',
-          day: dayDate(todayKey()),
-          used: { gt: 0 },
-        },
-        data: { used: { decrement: 1 } },
-      });
-    });
-
-    it('recrédite le portefeuille', async () => {
       await service.refundCredit(ACCOUNT, 'wallet');
 
-      expect(prisma.creditWallet.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'user-1' },
-        data: { balance: { increment: 1 } },
-      });
+      expect(prisma.creditWallet.updateMany).not.toHaveBeenCalled();
     });
   });
 

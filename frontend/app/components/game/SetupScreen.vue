@@ -206,7 +206,8 @@ const inputClass
     />
 
     <p v-if="status === 'ready' && credits" class="text-center font-mono text-caption text-tertiary">
-      Missions restantes aujourd'hui : {{ credits.remaining }}
+      <template v-if="credits.unlimited">Missions illimitées</template>
+      <template v-else>Missions restantes aujourd'hui : {{ credits.remaining }}</template>
     </p>
 
     <Button size="l" class="w-full" @click="step = 'table'">
@@ -350,6 +351,9 @@ const inputClass
       <template v-else-if="credits">
         <p v-if="outOfCredits" class="text-body-s text-secondary">
           Tu as épuisé tes missions du jour. Elles reviennent à minuit — ou tout de suite avec un pack.
+        </p>
+        <p v-else-if="credits.unlimited" class="font-mono text-caption text-tertiary">
+          Missions illimitées
         </p>
         <p v-else class="font-mono text-caption text-tertiary">
           Missions restantes aujourd'hui : {{ credits.remaining }}

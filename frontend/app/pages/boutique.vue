@@ -45,11 +45,11 @@ async function claim(pack: PackId) {
       <div>
         <div class="font-display text-body-s uppercase tracking-caps text-secondary">Missions restantes</div>
         <div class="mt-0.5 font-mono text-caption text-tertiary">
-          <template v-if="credits.unlimited">plafond quotidien de {{ credits.dailyLimit }}</template>
+          <template v-if="credits.unlimited">sans plafond</template>
           <template v-else>{{ credits.dailyLimit }} par jour, remise à zéro à minuit</template>
         </div>
       </div>
-      <span class="font-display text-display-s text-primary">{{ credits.remaining }}</span>
+      <span v-if="!credits.unlimited" class="font-display text-display-s text-primary">{{ credits.remaining }}</span>
     </Card>
 
     <Toast v-if="!account && status === 'ready'" tone="info">
