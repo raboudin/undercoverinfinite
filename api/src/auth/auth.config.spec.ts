@@ -106,7 +106,7 @@ describe('auth.config', () => {
       expect(buildAuthConfig().oauth.google).toEqual({
         clientID: 'id-google',
         clientSecret: 'secret-google',
-        callbackURL: 'http://localhost:3001/auth/google/callback',
+        callbackURL: 'http://localhost:8000/auth/google/callback',
       });
     });
 

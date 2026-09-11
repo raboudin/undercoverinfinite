@@ -21,5 +21,5 @@ COPY --from=build /app/package.json ./package.json
 # l'accepte plus dans le bloc datasource).
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts ./prisma.config.ts
-EXPOSE 3000
+EXPOSE 8000
 CMD ["node", "dist/main"]

@@ -76,7 +76,7 @@ services:
       - traefik.http.routers.undercoverinfinite-staging-api.entrypoints=websecure
       - traefik.http.routers.undercoverinfinite-staging-api.tls=true
       - traefik.http.routers.undercoverinfinite-staging-api.tls.certresolver=le
-      - traefik.http.services.undercoverinfinite-staging-api.loadbalancer.server.port=3000
+      - traefik.http.services.undercoverinfinite-staging-api.loadbalancer.server.port=8000
 
   app:
     image: ${CI_REGISTRY_IMAGE}/app:${IMAGE_TAG}

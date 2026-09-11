@@ -4,12 +4,13 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RoomsModule } from './rooms/rooms.module';
 import { WordsModule } from './words/words.module';
 
 // Plus de `ScheduleModule` : les mots ne sont plus produits par un cron
 // quotidien mais à la demande, quand un tirage n'a plus rien d'inédit à servir.
 @Module({
-  imports: [PrismaModule, AuthModule, EntitlementsModule, WordsModule],
+  imports: [PrismaModule, AuthModule, EntitlementsModule, WordsModule, RoomsModule],
   controllers: [AppController],
   providers: [AppService],
 })

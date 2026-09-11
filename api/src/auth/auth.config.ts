@@ -51,7 +51,7 @@ const logger = new Logger('AuthConfig');
 export const DEFAULT_ACCESS_TOKEN_TTL = '5h';
 export const DEFAULT_REFRESH_TOKEN_TTL = '30d';
 const DEFAULT_FRONTEND_URL = 'http://localhost:3000';
-const DEFAULT_API_URL = 'http://localhost:3001';
+const DEFAULT_API_URL = 'http://localhost:8000';
 
 /** Lit une variable d'env en traitant vide/espaces comme absente. */
 function env(name: string): string | undefined {
@@ -110,7 +110,7 @@ function resolveSameSite(): SameSite {
     logger.warn(`AUTH_COOKIE_SAME_SITE="${raw}" inconnu : retour à "strict"`);
   }
   // `strict` convient tant que le front et l'API partagent le même domaine
-  // enregistrable (localhost:3000 / localhost:3001 en dev,
+  // enregistrable (localhost:3000 / localhost:8000 en dev,
   // *.undercoverinfinite.com en déploiement) — c'est le cas ici.
   return 'strict';
 }

@@ -172,3 +172,125 @@ model ContentDraw {
   @@index([subject, kind])
   @@map("content_draws")
 }
+
+// Partie en ligne. `code` est l'identifiant partagé (lien d'invitation, saisie
+// manuelle) : court, non ambigu à l'oral/à l'écrit. `id` (cuid) reste
+// l'identifiant interne pour toutes les relations, `code` n'est jamais utilisé
+// comme clé étrangère — il peut changer de politique de génération sans casser
+// les FK.
+//
+// `hostPlayerId` n'est PAS une relation Prisma : comme `ContentDraw` vis-à-vis
+// de `WordPair`, une FK circulaire Room<->RoomPlayer compliquerait l'ordre de
+// création pour un bénéfice nul (un salon naît toujours avec son hôte dans la
+// même transaction). L'intégrité est assurée par le service, pas par la base.
+//
+// Les états (`phase`, `mode`, `theme`, `winner`) restent des `String`, comme
+// partout ailleurs dans ce schéma (cf. `ContentDraw.kind`) — pas d'enum Prisma.
+model Room {
+  id                     String   @id @default(cuid())
+  code                   String   @unique
+  hostPlayerId           String?
+
+  /// lobby | reveal | describe | bets | vote | elimination | victory
+  phase                  String   @default("lobby")
+  mode                   String   @default("classique")
+  theme                  String   @default("general")
+  undercoverCount        Int?
+  timerSeconds           Int?
+  challenge              String?
+
+  round                  Int      @default(0)
+  /// Tentative de vote au sein de la manche courante — incrémentée à chaque
+  /// égalité (plafonnée à 3, cf. `engine/voting.ts`), jamais à un tour normal.
+  attempt                Int      @default(1)
+  speakerIndex           Int      @default(0)
+
+  lastEliminatedPlayerId String?
+  /// civils | undercovers, rempli seulement en phase victory
+  winner                 String?
+
+  /// Incrémenté à chaque nouvelle distribution (lancement ou replay) : sert de
+  /// clé défensive pour ne jamais mélanger les votes d'une manche rejouée avec
+  /// ceux de la précédente, sans avoir à les purger.
+  dealNumber             Int      @default(1)
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  players RoomPlayer[]
+  votes   RoomVote[]
+
+  @@map("rooms")
+}
+
+// Un joueur dans une salle. `subjectKey` est le `Subject.key` de
+// `entitlements/subject.ts` (`user:<id>` ou `device:<uuid>`) — utile
+// uniquement pour savoir QUI PAIE (l'hôte) et préremplir le nom depuis le
+// dossier ; ce n'est PAS la clé de reconnexion (voir `playerTokenHash`), donc
+// aucune contrainte d'unicité dessus : deux onglets du même appareil peuvent
+// tout à fait être deux agents différents à la même table.
+//
+// `role`/`word` sont nuls tant que la partie n'a pas démarré, puis réécrits en
+// place à chaque nouvelle distribution (pas de nouvelle ligne par manche) :
+// ce salon n'a pas vocation à garder un historique de parties, seulement
+// l'état de la partie en cours.
+model RoomPlayer {
+  id              String   @id @default(cuid())
+  roomId          String
+  subjectKey      String
+  displayName     String
+  isHost          Boolean  @default(false)
+
+  /// Assigné au lancement (ordre d'arrivée en salle) ; sert à dériver le même
+  /// ordre de parole tournant que `speakingOrder` côté local.
+  seat            Int?
+
+  role            String?
+  word            String?
+  alive           Boolean  @default(true)
+  hasSeenReveal   Boolean  @default(false)
+
+  connected       Boolean  @default(false)
+
+  /// Jeton opaque de reconnexion, jamais stocké en clair (même idiome que
+  /// `RefreshToken.tokenHash` : SHA-256 nu, l'aléa du jeton suffit). Distinct
+  /// du cookie `device_id` : celui-ci identifie un APPAREIL pour le quota de
+  /// crédits, celui-là identifie UN SIÈGE dans UNE salle et vit côté client en
+  /// `localStorage` (c'est le socket qui le lit, pas une route Express).
+  playerTokenHash String   @unique
+
+  joinedAt        DateTime @default(now())
+
+  room          Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  votesCast     RoomVote[] @relation("VoterVotes")
+  votesReceived RoomVote[] @relation("TargetVotes")
+
+  @@unique([roomId, seat])
+  @@index([roomId])
+  @@map("room_players")
+}
+
+// Un vote = une ligne, jamais réécrite. `attempt` distingue un vote normal
+// d'une revote déclenchée par une égalité : le dépouillement filtre toujours
+// sur (dealNumber, round, attempt) courants, ce qui évite d'avoir à purger quoi
+// que ce soit entre deux tentatives — l'historique complet reste consultable.
+// Le vote est public par choix produit (chaque clic est diffusé à toute la
+// salle) : aucune rédaction n'est nécessaire sur cette table.
+model RoomVote {
+  id         String   @id @default(cuid())
+  roomId     String
+  dealNumber Int
+  round      Int
+  attempt    Int      @default(1)
+  voterId    String
+  targetId   String
+  createdAt  DateTime @default(now())
+
+  room   Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  voter  RoomPlayer @relation("VoterVotes", fields: [voterId], references: [id], onDelete: Cascade)
+  target RoomPlayer @relation("TargetVotes", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, dealNumber, round, attempt, voterId])
+  @@index([roomId, dealNumber, round, attempt])
+  @@map("room_votes")
+}
