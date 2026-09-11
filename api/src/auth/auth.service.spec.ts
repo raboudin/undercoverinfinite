@@ -47,7 +47,6 @@ describe('AuthService', () => {
       deleteMany: jest.Mock;
       findUnique: jest.Mock;
     };
-    dailyUsage: { deleteMany: jest.Mock };
     contentDraw: { deleteMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -76,7 +75,6 @@ describe('AuthService', () => {
         deleteMany: jest.fn(),
         findUnique: jest.fn(),
       },
-      dailyUsage: { deleteMany: jest.fn() },
       contentDraw: { deleteMany: jest.fn() },
       // Les opérations sont passées telles quelles : ce qui compte ici est
       // *lesquelles* partent ensemble, pas ce que la base en renvoie.
@@ -505,12 +503,8 @@ describe('AuthService', () => {
     it('emporte le compte et les traces qui ne partent pas en cascade', async () => {
       await service.deleteAccount('user-1', { password: PASSWORD });
 
-      // `daily_usage` et `content_draws` n'ont pas de clé étrangère vers
-      // `users` : sans ces deux suppressions, la consommation et l'historique
-      // de tirage survivraient à l'effacement du dossier.
-      expect(prisma.dailyUsage.deleteMany).toHaveBeenCalledWith({
-        where: { subject: 'user:user-1' },
-      });
+      // `content_draws` n'a pas de clé étrangère vers `users` : sans cette
+      // suppression, l'historique de tirage survivrait à l'effacement du dossier.
       expect(prisma.contentDraw.deleteMany).toHaveBeenCalledWith({
         where: { subject: 'user:user-1' },
       });
@@ -520,7 +514,7 @@ describe('AuthService', () => {
       // Le tout dans une seule transaction : un effacement à moitié fait
       // laisserait des traces orphelines qu'aucun compte ne réclamerait plus.
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(firstArg<unknown[]>(prisma.$transaction)).toHaveLength(3);
+      expect(firstArg<unknown[]>(prisma.$transaction)).toHaveLength(2);
     });
 
     it('accepte la suppression d’un compte OAuth, qui n’a pas de mot de passe', async () => {

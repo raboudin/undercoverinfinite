@@ -343,14 +343,7 @@ describe('Auth (e2e)', () => {
       userId = (res.body as { user: { id: string } }).user.id;
 
       // De quoi vérifier que l'effacement emporte aussi ce qui ne part pas en
-      // cascade : ces deux tables n'ont pas de clé étrangère vers `users`.
-      await prisma.dailyUsage.create({
-        data: {
-          subject: `user:${userId}`,
-          day: new Date('2026-08-04'),
-          used: 3,
-        },
-      });
+      // cascade : cette table n'a pas de clé étrangère vers `users`.
       await prisma.contentDraw.create({
         data: { subject: `user:${userId}`, kind: 'pair', refId: 'paire-e2e' },
       });
@@ -358,9 +351,6 @@ describe('Auth (e2e)', () => {
 
     afterAll(async () => {
       await prisma.user.deleteMany({ where: { email: doomedEmail } });
-      await prisma.dailyUsage.deleteMany({
-        where: { subject: `user:${userId}` },
-      });
       await prisma.contentDraw.deleteMany({
         where: { subject: `user:${userId}` },
       });
@@ -399,10 +389,7 @@ describe('Auth (e2e)', () => {
       expect(await prisma.user.count({ where: { id: userId } })).toBe(0);
       // Cascade depuis `users`.
       expect(await prisma.refreshToken.count({ where: { userId } })).toBe(0);
-      // Et les deux tables que la cascade n'atteint pas.
-      expect(
-        await prisma.dailyUsage.count({ where: { subject: `user:${userId}` } }),
-      ).toBe(0);
+      // Et la table que la cascade n'atteint pas.
       expect(
         await prisma.contentDraw.count({
           where: { subject: `user:${userId}` },

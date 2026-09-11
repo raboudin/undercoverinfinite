@@ -1,35 +1,29 @@
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import {
-  MODE_IDS,
+  DIFFICULTY_IDS,
   THEME_IDS,
-  type ModeId,
+  type DifficultyId,
   type ThemeId,
 } from '../../entitlements/catalog';
-import {
-  MAX_PLAYERS,
-  MAX_TIMER_SECONDS,
-  MIN_TIMER_SECONDS,
-} from '../engine/validate';
+import { MAX_PLAYERS } from '../engine/validate';
 
 /** Événement socket `room:configure`, hôte uniquement, phase `lobby`. */
 export class ConfigureRoomDto {
   @IsOptional()
-  @IsIn([...MODE_IDS], { message: 'Mode de jeu inconnu.' })
-  mode?: ModeId;
-
-  @IsOptional()
   @IsIn([...THEME_IDS], { message: 'Thème inconnu.' })
   theme?: ThemeId;
+
+  @IsOptional()
+  @IsBoolean()
+  spicy?: boolean;
+
+  @IsOptional()
+  @IsIn([...DIFFICULTY_IDS], { message: 'Difficulté inconnue.' })
+  difficulty?: DifficultyId;
 
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(MAX_PLAYERS)
   undercoverCount?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(MIN_TIMER_SECONDS)
-  @Max(MAX_TIMER_SECONDS)
-  timerSeconds?: number;
 }

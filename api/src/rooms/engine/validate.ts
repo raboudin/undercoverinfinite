@@ -1,11 +1,6 @@
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 12;
 
-/** Mode chrono uniquement — mêmes bornes que `useGame.ts`. */
-export const DEFAULT_TIMER_SECONDS = 30;
-export const MIN_TIMER_SECONDS = 10;
-export const MAX_TIMER_SECONDS = 120;
-
 /**
  * Les civils restent strictement majoritaires au lancement — même règle que
  * `useGame.ts`'s `maxUndercovers`. Ce n'est plus une question de règle (les

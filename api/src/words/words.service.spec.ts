@@ -1,27 +1,10 @@
-import {
-  ForbiddenException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
-import type {
-  CreditsDto,
-  EntitlementsService,
-} from '../entitlements/entitlements.service';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import type { Subject } from '../entitlements/subject';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { LlmClient } from './llm.client';
 import { WordsService } from './words.service';
 
 const SUBJECT: Subject = { key: 'device:abc', userId: null };
-
-const CREDITS: CreditsDto = {
-  dailyLimit: 5,
-  dailyUsed: 1,
-  dailyRemaining: 4,
-  wallet: 0,
-  remaining: 4,
-  unlimited: false,
-  resetsOn: '2026-08-04',
-};
 
 const GENERATED = [
   { a: 'Café', b: 'Thé' },
@@ -33,6 +16,7 @@ function pairRow(id: string, a: string, b: string) {
     id,
     theme: 'general',
     spicy: false,
+    difficulty: 3,
     wordA: a,
     wordB: b,
     createdAt: new Date(),
@@ -42,13 +26,7 @@ function pairRow(id: string, a: string, b: string) {
 describe('WordsService', () => {
   let prisma: {
     wordPair: { count: jest.Mock; findMany: jest.Mock; createMany: jest.Mock };
-    challenge: { count: jest.Mock; findMany: jest.Mock; createMany: jest.Mock };
     contentDraw: { findMany: jest.Mock; create: jest.Mock };
-  };
-  let entitlements: {
-    assertCanPlay: jest.Mock;
-    consumeCredit: jest.Mock;
-    refundCredit: jest.Mock;
   };
   let llm: { complete: jest.Mock };
   let service: WordsService;
@@ -60,32 +38,15 @@ describe('WordsService', () => {
         findMany: jest.fn().mockResolvedValue([pairRow('p1', 'Café', 'Thé')]),
         createMany: jest.fn().mockResolvedValue({ count: GENERATED.length }),
       },
-      challenge: {
-        count: jest.fn().mockResolvedValue(1),
-        findMany: jest
-          .fn()
-          .mockResolvedValue([
-            { id: 'c1', text: 'Parle à la troisième personne' },
-          ]),
-        createMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
       contentDraw: {
         findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockResolvedValue({}),
       },
     };
-    entitlements = {
-      assertCanPlay: jest.fn().mockResolvedValue(undefined),
-      consumeCredit: jest
-        .fn()
-        .mockResolvedValue({ from: 'daily', credits: CREDITS }),
-      refundCredit: jest.fn().mockResolvedValue(undefined),
-    };
     llm = { complete: jest.fn().mockResolvedValue(JSON.stringify(GENERATED)) };
 
     service = new WordsService(
       prisma as unknown as PrismaService,
-      entitlements as unknown as EntitlementsService,
       llm as unknown as LlmClient,
     );
   });
@@ -102,23 +63,26 @@ describe('WordsService', () => {
   }
 
   it('sert une paire du pool sans appeler le LLM quand il en reste', async () => {
-    const result = await service.draw(SUBJECT, 'classique', 'general');
+    const result = await service.draw(SUBJECT, 'general', false, 'normal');
 
     expect(result.pair).toEqual({ a: 'Café', b: 'Thé' });
     expect(llm.complete).not.toHaveBeenCalled();
   });
 
-  it('vérifie les droits avant de débiter quoi que ce soit', async () => {
-    entitlements.assertCanPlay.mockRejectedValue(new ForbiddenException('non'));
+  it('refuse un thème inconnu', async () => {
+    await expect(
+      service.draw(SUBJECT, 'inexistant' as never, false, 'normal'),
+    ).rejects.toThrow(BadRequestException);
+  });
 
-    await expect(service.draw(SUBJECT, 'hot', 'general')).rejects.toThrow(
-      ForbiddenException,
-    );
-    expect(entitlements.consumeCredit).not.toHaveBeenCalled();
+  it('refuse une difficulté inconnue', async () => {
+    await expect(
+      service.draw(SUBJECT, 'general', false, 'extreme' as never),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('note le tirage pour ne pas resservir la même paire', async () => {
-    await service.draw(SUBJECT, 'classique', 'general');
+    await service.draw(SUBJECT, 'general', false, 'normal');
 
     expect(prisma.contentDraw.create).toHaveBeenCalledWith({
       data: { subject: 'device:abc', kind: 'pair', refId: 'p1' },
@@ -128,25 +92,26 @@ describe('WordsService', () => {
   it('exclut du tirage ce que le sujet a déjà vu', async () => {
     prisma.contentDraw.findMany.mockResolvedValue([{ refId: 'p0' }]);
 
-    await service.draw(SUBJECT, 'classique', 'general');
+    await service.draw(SUBJECT, 'general', false, 'normal');
 
     expect(prisma.wordPair.count).toHaveBeenCalledWith({
-      where: { theme: 'general', spicy: false, id: { notIn: ['p0'] } },
+      where: { theme: 'general', spicy: false, difficulty: 3, id: { notIn: ['p0'] } },
     });
   });
 
   it('génère un lot quand le pool n’a plus rien d’inédit', async () => {
     emptyPoolThenFilled();
 
-    await service.draw(SUBJECT, 'classique', 'general');
+    await service.draw(SUBJECT, 'general', false, 'normal');
 
     expect(llm.complete).toHaveBeenCalledTimes(1);
     expect(prisma.wordPair.createMany).toHaveBeenCalledWith({
       data: [
-        { theme: 'general', spicy: false, wordA: 'Café', wordB: 'Thé' },
+        { theme: 'general', spicy: false, difficulty: 3, wordA: 'Café', wordB: 'Thé' },
         {
           theme: 'general',
           spicy: false,
+          difficulty: 3,
           wordA: 'Avion',
           wordB: 'Hélicoptère',
         },
@@ -166,8 +131,8 @@ describe('WordsService', () => {
     );
 
     const both = Promise.all([
-      service.draw(SUBJECT, 'classique', 'general'),
-      service.draw(SUBJECT, 'classique', 'general'),
+      service.draw(SUBJECT, 'general', false, 'normal'),
+      service.draw(SUBJECT, 'general', false, 'normal'),
     ]);
     release();
     await both;
@@ -175,106 +140,78 @@ describe('WordsService', () => {
     expect(llm.complete).toHaveBeenCalledTimes(1);
   });
 
-  it('rembourse le crédit quand la génération échoue', async () => {
-    emptyPoolThenFilled();
-    llm.complete.mockRejectedValue(new Error('gateway down'));
-
-    await expect(
-      service.draw(SUBJECT, 'classique', 'general'),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    expect(entitlements.refundCredit).toHaveBeenCalledWith(SUBJECT, 'daily');
-  });
-
   it('sort une panne de LLM en 503, sans exposer le détail technique', async () => {
     emptyPoolThenFilled();
     llm.complete.mockRejectedValue(new Error('LLM_API_KEY manquante'));
 
     // Un 500 dirait « bug de l'API » là où la dépendance seule est en cause.
-    await expect(service.draw(SUBJECT, 'classique', 'general')).rejects.toThrow(
-      /Le QG n’arrive pas à préparer cette mission/,
-    );
-  });
-
-  it('laisse passer un refus de droits sans le maquiller en panne', async () => {
-    entitlements.consumeCredit.mockRejectedValue(new ForbiddenException('non'));
-
-    await expect(service.draw(SUBJECT, 'classique', 'general')).rejects.toThrow(
-      ForbiddenException,
-    );
-  });
-
-  it('ne rembourse rien quand la partie est servie', async () => {
-    await service.draw(SUBJECT, 'classique', 'general');
-
-    expect(entitlements.refundCredit).not.toHaveBeenCalled();
+    await expect(
+      service.draw(SUBJECT, 'general', false, 'normal'),
+    ).rejects.toThrow(/Le QG n’arrive pas à préparer cette mission/);
   });
 
   describe('thèmes', () => {
     it('tire dans le pool du thème demandé', async () => {
-      await service.draw(SUBJECT, 'classique', 'football');
+      await service.draw(SUBJECT, 'football', false, 'normal');
 
       expect(prisma.wordPair.count).toHaveBeenCalledWith({
-        where: { theme: 'football', spicy: false, id: { notIn: [] } },
+        where: { theme: 'football', spicy: false, difficulty: 3, id: { notIn: [] } },
       });
     });
 
     it('injecte la consigne du thème dans le prompt', async () => {
       emptyPoolThenFilled();
 
-      await service.draw(SUBJECT, 'classique', 'football');
+      await service.draw(SUBJECT, 'football', false, 'normal');
 
       expect(firstPrompt()).toContain('Registre football');
     });
   });
 
-  describe('mode hot', () => {
+  describe('contenu hot', () => {
     it('sépare son pool de celui du même thème en registre normal', async () => {
-      await service.draw(SUBJECT, 'hot', 'general');
+      await service.draw(SUBJECT, 'general', true, 'normal');
 
       expect(prisma.wordPair.count).toHaveBeenCalledWith({
-        where: { theme: 'general', spicy: true, id: { notIn: [] } },
+        where: { theme: 'general', spicy: true, difficulty: 3, id: { notIn: [] } },
       });
     });
 
     it('demande un registre osé mais borné', async () => {
       emptyPoolThenFilled();
 
-      await service.draw(SUBJECT, 'hot', 'general');
+      await service.draw(SUBJECT, 'general', true, 'normal');
 
       const prompt = firstPrompt();
       expect(prompt).toContain('osé');
       expect(prompt).toContain('adultes consentants');
       expect(prompt).toContain('rien d’explicite');
     });
+
+    it('se combine avec n’importe quel thème, indépendamment de celui-ci', async () => {
+      await service.draw(SUBJECT, 'football', true, 'normal');
+
+      expect(prisma.wordPair.count).toHaveBeenCalledWith({
+        where: { theme: 'football', spicy: true, difficulty: 3, id: { notIn: [] } },
+      });
+    });
   });
 
-  describe('mode défi', () => {
-    it('accompagne la partie d’un défi', async () => {
-      const result = await service.draw(SUBJECT, 'defi', 'general');
+  describe('difficulté', () => {
+    it('sépare son pool de celui d’une autre difficulté', async () => {
+      await service.draw(SUBJECT, 'general', false, 'farfelu');
 
-      expect(result.challenge).toBe('Parle à la troisième personne');
-      expect(prisma.contentDraw.create).toHaveBeenCalledWith({
-        data: { subject: 'device:abc', kind: 'challenge', refId: 'c1' },
+      expect(prisma.wordPair.count).toHaveBeenCalledWith({
+        where: { theme: 'general', spicy: false, difficulty: 5, id: { notIn: [] } },
       });
     });
 
-    it('ne tire aucun défi dans les autres modes', async () => {
-      const result = await service.draw(SUBJECT, 'classique', 'general');
+    it('injecte la consigne d’éloignement du palier dans le prompt', async () => {
+      emptyPoolThenFilled();
 
-      expect(result.challenge).toBeNull();
-      expect(prisma.challenge.count).not.toHaveBeenCalled();
-    });
+      await service.draw(SUBJECT, 'general', false, 'evident');
 
-    it('génère des défis quand le stock est vide', async () => {
-      prisma.challenge.count.mockResolvedValueOnce(0).mockResolvedValue(1);
-      llm.complete.mockResolvedValue(JSON.stringify(['Utilise une couleur']));
-
-      await service.draw(SUBJECT, 'defi', 'general');
-
-      expect(prisma.challenge.createMany).toHaveBeenCalledWith({
-        data: [{ text: 'Utilise une couleur' }],
-        skipDuplicates: true,
-      });
+      expect(firstPrompt()).toContain('presque interchangeables');
     });
   });
 });

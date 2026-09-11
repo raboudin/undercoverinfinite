@@ -70,7 +70,10 @@ describe('OnlineRevealScreen', () => {
   it('émet ack une fois la carte mémorisée', async () => {
     const wrapper = mountScreen()
     await wrapper.findComponent(GameTable).findAll('button')[0]!.trigger('click')
-    await wrapper.findComponent(Button).trigger('click')
+    // `findComponent(Button)` attraperait aussi les <button> natifs de
+    // `GameTable` (mêmes classes utilitaires) : on cible le dernier bouton du
+    // DOM, qui est bien le CTA de confirmation hors du plateau.
+    await wrapper.findAll('button').at(-1)!.trigger('click')
 
     expect(wrapper.emitted('ack')).toHaveLength(1)
   })

@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Lock, X } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, X } from '@lucide/vue'
 import type { ThemeCard, ThemeId } from '../../composables/useEntitlements'
 import { themeHero } from '../../utils/gameArt'
 
 /**
  * Vitrine des dossiers thématiques : un thème par écran, on passe au suivant au
  * doigt ou à la flèche.
- *
- * Présentationnel comme les autres écrans de jeu : un dossier verrouillé
- * remonte `locked`, il ne navigue pas lui-même vers la boutique — sinon chaque
- * test devrait installer un routeur.
  */
 const props = withDefaults(defineProps<{
   open: boolean
@@ -21,7 +17,7 @@ const props = withDefaults(defineProps<{
 
 const selected = defineModel<ThemeId>({ default: 'general' })
 
-const emit = defineEmits<{ close: []; locked: [ThemeId] }>()
+const emit = defineEmits<{ close: [] }>()
 
 /** Distance à parcourir avant qu'un glissement compte comme un changement de page. */
 const SWIPE_THRESHOLD = 56
@@ -56,10 +52,6 @@ function go(step: number) {
 function choose() {
   const theme = current.value
   if (!theme) return
-  if (!theme.unlocked) {
-    emit('locked', theme.id)
-    return
-  }
   selected.value = theme.id
   emit('close')
 }
@@ -180,19 +172,12 @@ function arrowClass(side: 'left' | 'right', enabled: boolean) {
               class="h-full w-full"
             />
             <div class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink-0 via-ink-0/80 to-transparent p-4 pt-16">
-              <div class="flex items-center gap-2">
-                <Lock v-if="!current.unlocked" :size="14" class="shrink-0 text-amber-4" />
-                <h2 class="font-display text-display-s uppercase tracking-caps text-primary">
-                  {{ current.label }}
-                </h2>
-              </div>
+              <h2 class="font-display text-display-s uppercase tracking-caps text-primary">
+                {{ current.label }}
+              </h2>
               <p class="mt-1 text-body-s text-secondary">{{ current.tagline }}</p>
             </div>
           </div>
-
-          <RoleTag :tone="current.unlocked ? 'ally' : 'classified'" class="self-start">
-            {{ current.unlocked ? 'Dossier accessible' : 'Dossier scellé' }}
-          </RoleTag>
         </div>
 
         <p v-else class="text-body-s text-tertiary">Aucun dossier disponible.</p>
@@ -236,16 +221,6 @@ function arrowClass(side: 'left' | 'right', enabled: boolean) {
         </div>
 
         <Button
-          v-if="current && !current.unlocked"
-          size="l"
-          variant="secondary"
-          class="w-full"
-          @click="choose()"
-        >
-          Débloquer dans la boutique
-        </Button>
-        <Button
-          v-else
           size="l"
           class="w-full"
           :disabled="!current"

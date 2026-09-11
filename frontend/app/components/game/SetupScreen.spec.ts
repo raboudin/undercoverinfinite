@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { DOMWrapper, mount } from '@vue/test-utils'
 import SetupScreen from './SetupScreen.vue'
-import ModeSelector from './ModeSelector.vue'
 import ThemeButton from './ThemeButton.vue'
 import ThemeCarousel from './ThemeCarousel.vue'
+import SpicyToggle from './SpicyToggle.vue'
+import DifficultySlider from './DifficultySlider.vue'
 import GameTable from './GameTable.vue'
 import ArtSlot from './ArtSlot.vue'
 import Button from '../core/Button.vue'
 import IconButton from '../core/IconButton.vue'
-import RoleTag from '../core/RoleTag.vue'
 import Card from '../data-display/Card.vue'
 import Toast from '../feedback/Toast.vue'
-import type { Credits, ModeCard, ThemeCard } from '../../composables/useEntitlements'
+import type { DifficultyCard, ThemeCard } from '../../composables/useEntitlements'
 
 // La vitrine des thèmes est téléportée dans `body`.
 afterEach(() => {
@@ -22,8 +22,8 @@ afterEach(() => {
 // unitaire il faut les enregistrer explicitement.
 const global = {
   components: {
-    Button, IconButton, Card, Toast, RoleTag,
-    ModeSelector, ThemeButton, ThemeCarousel, GameTable, ArtSlot
+    Button, IconButton, Card, Toast,
+    ThemeButton, ThemeCarousel, SpicyToggle, DifficultySlider, GameTable, ArtSlot
   }
 }
 
@@ -31,38 +31,26 @@ const ADD_PLAYER = '[aria-label="Ajouter un agent"]'
 const REMOVE_PLAYER = '[aria-label="Retirer un agent"]'
 const ADD_UNDERCOVER = '[aria-label="Ajouter un undercover"]'
 const REMOVE_UNDERCOVER = '[aria-label="Retirer un undercover"]'
-const ADD_TIME = '[aria-label="Augmenter le temps de parole"]'
-
-const CREDITS: Credits = {
-  dailyLimit: 5,
-  dailyUsed: 2,
-  dailyRemaining: 3,
-  wallet: 0,
-  remaining: 3,
-  unlimited: false,
-  resetsOn: '2026-08-04'
-}
-
-const MODES: ModeCard[] = [
-  { id: 'classique', label: 'Classique', tagline: 'La mission d’origine.', available: true, unlocked: true, playable: true },
-  { id: 'chrono', label: 'Chrono', tagline: 'Parole minutée.', available: true, unlocked: true, playable: true },
-  { id: 'hot', label: 'Hot', tagline: 'Mots osés.', available: true, spicy: true, unlocked: true, playable: true },
-  { id: 'teams', label: 'Teams', tagline: 'Deux équipes.', available: false, unlocked: true, playable: false },
-  { id: 'pari', label: 'Pari risqué', tagline: 'Chacun mise.', available: true, unlocked: false, playable: false }
-]
+const SPICY_SWITCH = '[role="switch"]'
 
 const THEMES: ThemeCard[] = [
-  { id: 'general', label: 'Tous horizons', tagline: 'Tout le terrain.', generalist: true, unlocked: true },
-  { id: 'culture', label: 'Culture', tagline: 'Livres et musique.', generalist: true, unlocked: true },
-  { id: 'football', label: 'Football', tagline: 'Joueurs et clubs.', generalist: false, unlocked: false }
+  { id: 'general', label: 'Tous horizons', tagline: 'Tout le terrain.' },
+  { id: 'culture', label: 'Culture', tagline: 'Livres et musique.' },
+  { id: 'football', label: 'Football', tagline: 'Joueurs et clubs.' }
+]
+
+const DIFFICULTIES: DifficultyCard[] = [
+  { id: 'evident', level: 1, label: 'Évident', tagline: 'Une association immédiate.' },
+  { id: 'normal', level: 3, label: 'Normal', tagline: 'Assez proches pour bluffer.' },
+  { id: 'farfelu', level: 5, label: 'Farfelu', tagline: 'Un lien indirect.' }
 ]
 
 type Wrapper = ReturnType<typeof mount>
 
-/** Écran prêt à jouer : droits chargés, crédits disponibles. Étape menu. */
+/** Écran prêt à jouer : droits chargés. Étape menu. */
 function ready(props: Record<string, unknown> = {}) {
   return mount(SetupScreen, {
-    props: { modes: MODES, themes: THEMES, credits: CREDITS, ...props },
+    props: { themes: THEMES, difficulties: DIFFICULTIES, ...props },
     global
   })
 }
@@ -93,11 +81,12 @@ async function fillNames(wrapper: Wrapper, names: string[]) {
 }
 
 describe('SetupScreen — menu principal', () => {
-  it('n’affiche que les modes et le dossier thématique', () => {
+  it('n’affiche que le dossier thématique, le registre hot et la difficulté', () => {
     const wrapper = ready()
 
-    expect(wrapper.findComponent(ModeSelector).exists()).toBe(true)
     expect(wrapper.findComponent(ThemeButton).exists()).toBe(true)
+    expect(wrapper.find(SPICY_SWITCH).exists()).toBe(true)
+    expect(wrapper.findComponent(DifficultySlider).exists()).toBe(true)
     // Ni effectif, ni noms de code, ni mots : tout ça vit sur la table.
     expect(wrapper.find('input[type="text"]').exists()).toBe(false)
     expect(wrapper.find(ADD_UNDERCOVER).exists()).toBe(false)
@@ -123,36 +112,24 @@ describe('SetupScreen — menu principal', () => {
     expect(document.body.textContent).toContain('Tout le terrain.')
   })
 
-  it('retire le dossier thématique en mode hot et prévient du registre', async () => {
+  it('active le registre hot sans masquer le dossier thématique', async () => {
     const wrapper = ready()
     expect(wrapper.text()).not.toContain('public adulte')
 
-    await wrapper.findComponent(ModeSelector).vm.$emit('update:modelValue', 'hot')
-    await wrapper.vm.$nextTick()
+    await wrapper.get(SPICY_SWITCH).trigger('click')
 
     expect(wrapper.text()).toContain('public adulte')
-    expect(wrapper.findComponent(ThemeButton).exists()).toBe(false)
+    // Le hot se combine avec un thème, il ne le remplace plus.
+    expect(wrapper.findComponent(ThemeButton).exists()).toBe(true)
   })
 
-  it('remonte un mode verrouillé vers la boutique', async () => {
+  it('choisit une difficulté au clic', async () => {
     const wrapper = ready()
-    await wrapper.findComponent(ModeSelector).vm.$emit('locked', 'pari')
-    expect(wrapper.emitted('boutique')).toHaveLength(1)
-  })
+    expect(wrapper.text()).toContain('Normal')
 
-  it('referme la vitrine et bascule sur la boutique pour un dossier scellé', async () => {
-    const wrapper = ready()
-    await wrapper.findComponent(ThemeButton).get('button').trigger('click')
+    await wrapper.get('[aria-label="Farfelu"]').trigger('click')
 
-    await wrapper.findComponent(ThemeCarousel).vm.$emit('locked', 'football')
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.emitted('boutique')).toHaveLength(1)
-    expect(document.body.textContent).not.toContain('Tout le terrain.')
-  })
-
-  it('annonce les missions restantes', () => {
-    expect(ready().text()).toContain("Missions restantes aujourd'hui : 3")
+    expect(wrapper.text()).toContain('Farfelu')
   })
 })
 
@@ -239,28 +216,28 @@ describe('SetupScreen — la table', () => {
     expect(wrapper.text()).toContain('3 loyaux · 1 infiltré')
   })
 
-  it('revient au choix du mode', async () => {
+  it('revient au dossier thématique', async () => {
     const wrapper = await atTable()
 
-    await wrapper.get('[aria-label="Revenir au choix du mode"]').trigger('click')
+    await wrapper.get('[aria-label="Revenir au dossier thématique"]').trigger('click')
 
-    expect(wrapper.findComponent(ModeSelector).exists()).toBe(true)
+    expect(wrapper.findComponent(ThemeButton).exists()).toBe(true)
     expect(wrapper.findComponent(GameTable).exists()).toBe(false)
   })
 
-  it('rappelle le mode et le dossier retenus', async () => {
+  it('rappelle le dossier et la difficulté retenus', async () => {
     const wrapper = ready()
-    await wrapper.findComponent(ModeSelector).vm.$emit('update:modelValue', 'chrono')
     await wrapper.findComponent(ThemeCarousel).vm.$emit('update:modelValue', 'culture')
+    await wrapper.get('[aria-label="Farfelu"]').trigger('click')
     await buttonNamed(wrapper, 'Dresser la table').trigger('click')
 
-    expect(wrapper.text()).toContain('Chrono')
     expect(wrapper.text()).toContain('Culture')
+    expect(wrapper.text()).toContain('Farfelu')
   })
 })
 
 describe('SetupScreen — lancement', () => {
-  it('émet start avec la config, le mode et le thème', async () => {
+  it('émet start avec la config, le thème, le hot et la difficulté', async () => {
     const wrapper = await atTable()
     const names = ['Marion', 'Karim', 'Sami', 'Léa']
     await fillNames(wrapper, names)
@@ -270,52 +247,31 @@ describe('SetupScreen — lancement', () => {
     expect(wrapper.emitted('start')).toEqual([
       [
         {
-          config: { names, undercoverCount: 1, mode: 'classique', timerSeconds: 30 },
-          theme: 'general'
+          config: { names, undercoverCount: 1 },
+          theme: 'general',
+          spicy: false,
+          difficulty: 'normal'
         }
       ]
     ])
   })
 
-  it('transmet le mode et le dossier choisis au menu', async () => {
+  it('transmet le thème, le hot et la difficulté choisis au menu', async () => {
     const wrapper = ready()
-    await wrapper.findComponent(ModeSelector).vm.$emit('update:modelValue', 'chrono')
     await wrapper.findComponent(ThemeCarousel).vm.$emit('update:modelValue', 'culture')
+    await wrapper.get(SPICY_SWITCH).trigger('click')
+    await wrapper.get('[aria-label="Farfelu"]').trigger('click')
     await buttonNamed(wrapper, 'Dresser la table').trigger('click')
     await fillNames(wrapper, ['Marion', 'Karim', 'Sami', 'Léa'])
 
     await launchButton(wrapper).trigger('click')
 
-    const [[submission]] = wrapper.emitted('start') as [{ config: { mode: string }, theme: string }][]
-    expect(submission.config.mode).toBe('chrono')
+    const [[submission]] = wrapper.emitted('start') as [
+      { theme: string, spicy: boolean, difficulty: string }
+    ][]
     expect(submission.theme).toBe('culture')
-  })
-
-  /** Le pool hot est déjà un registre à part : il n'a pas de dossier à croiser. */
-  it('retombe sur le dossier généraliste en mode hot', async () => {
-    const wrapper = ready()
-    await wrapper.findComponent(ThemeCarousel).vm.$emit('update:modelValue', 'culture')
-    await wrapper.findComponent(ModeSelector).vm.$emit('update:modelValue', 'hot')
-    await buttonNamed(wrapper, 'Dresser la table').trigger('click')
-    await fillNames(wrapper, ['Marion', 'Karim', 'Sami', 'Léa'])
-
-    await launchButton(wrapper).trigger('click')
-
-    const [[submission]] = wrapper.emitted('start') as [{ theme: string }][]
-    expect(submission.theme).toBe('general')
-  })
-
-  it('ne règle le temps de parole qu’en mode chrono', async () => {
-    const wrapper = await atTable()
-    expect(wrapper.find(ADD_TIME).exists()).toBe(false)
-
-    await wrapper.get('[aria-label="Revenir au choix du mode"]').trigger('click')
-    await wrapper.findComponent(ModeSelector).vm.$emit('update:modelValue', 'chrono')
-    await buttonNamed(wrapper, 'Dresser la table').trigger('click')
-
-    expect(wrapper.text()).toContain('30s')
-    await wrapper.get(ADD_TIME).trigger('click')
-    expect(wrapper.text()).toContain('35s')
+    expect(submission.spicy).toBe(true)
+    expect(submission.difficulty).toBe('farfelu')
   })
 
   it('affiche l’erreur de validation renvoyée par le jeu', async () => {
@@ -324,31 +280,16 @@ describe('SetupScreen — lancement', () => {
     expect((await atTable({ error: message })).findComponent(Toast).text()).toBe(message)
   })
 
-  it('détaille la réserve achetée quand il y en a une', async () => {
-    const wrapper = await atTable({ credits: { ...CREDITS, wallet: 12, remaining: 15 } })
-    expect(wrapper.text()).toContain('3 du jour + 12 en réserve')
-  })
-
   it('bloque le lancement tant que les droits ne sont pas connus', async () => {
-    const wrapper = await atTable({ status: 'loading' as const, credits: null })
+    const wrapper = await atTable({ status: 'loading' as const })
     expect(launchButton(wrapper).attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('vérification de ton dossier')
+    expect(wrapper.text()).toContain('vérification du dossier')
   })
 
   it('bloque le lancement pendant le tirage', async () => {
     const wrapper = await atTable({ drawing: true })
     expect(launchButton(wrapper).attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('Contact du QG…')
-  })
-
-  it('bloque à quota épuisé et renvoie vers les packs', async () => {
-    const wrapper = await atTable({ credits: { ...CREDITS, dailyRemaining: 0, remaining: 0 } })
-
-    expect(launchButton(wrapper).attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('épuisé tes missions du jour')
-
-    await buttonNamed(wrapper, 'Voir les packs').trigger('click')
-    expect(wrapper.emitted('boutique')).toHaveLength(1)
   })
 
   it('propose de réessayer quand le QG est injoignable', async () => {
@@ -359,15 +300,9 @@ describe('SetupScreen — lancement', () => {
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
 
-  it('renvoie vers la boutique quand le tirage bute sur un verrou', async () => {
-    const wrapper = await atTable({
-      wordsError: 'Le mode Hot demande un pack.',
-      wordsErrorKind: 'locked' as const
-    })
-
-    expect(wrapper.text()).toContain('Le mode Hot demande un pack.')
-    await buttonNamed(wrapper, 'Voir les packs').trigger('click')
-    expect(wrapper.emitted('boutique')).toHaveLength(1)
+  it('affiche l’erreur de tirage', async () => {
+    const wrapper = await atTable({ wordsError: 'Le QG n’arrive pas à préparer cette mission.' })
+    expect(wrapper.text()).toContain('Le QG n’arrive pas à préparer cette mission.')
   })
 })
 

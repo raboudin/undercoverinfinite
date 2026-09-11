@@ -136,12 +136,14 @@ const inputClass
       :viewer-player-id="state.viewerPlayerId"
       :is-host="state.isHost"
       :theme="state.theme"
+      :spicy="state.spicy"
+      :difficulty="state.difficulty"
       :undercover-count="state.undercoverCount"
       :themes="entitlements.themeCards.value"
+      :difficulties="entitlements.difficultyCards.value"
       @start="room.start()"
       @configure="room.configureRoom($event)"
       @leave="leaveToMenu()"
-      @boutique="navigateTo('/boutique')"
     />
 
     <OnlineRevealScreen
@@ -158,8 +160,6 @@ const inputClass
       :players="localPlayers"
       :order="speakingOrderPlayers.map(toLocalPlayer)"
       :speaker-index="state.speakerIndex"
-      :timed="false"
-      :challenge="state.challenge"
       @next="room.nextSpeaker()"
     />
 

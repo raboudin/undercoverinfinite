@@ -1,21 +1,13 @@
 import { ref } from 'vue'
-import type { Credits, ModeId, ThemeId } from './useEntitlements'
+import type { DifficultyId, ThemeId } from './useEntitlements'
 import type { WordPair } from './useGame'
 
 export type WordsStatus = 'idle' | 'drawing' | 'ready' | 'error'
 
-/**
- * Pourquoi le tirage a échoué. Le message seul ne suffit pas : l'écran propose
- * la boutique pour `locked`, une explication d'attente pour `credits`, et un
- * simple « réessaie » pour le reste.
- */
-export type WordsErrorKind = 'credits' | 'locked' | 'unavailable' | 'network'
+export type WordsErrorKind = 'unavailable' | 'network'
 
 export interface DrawResponse {
   pair: WordPair
-  /** Rempli seulement en mode défi. */
-  challenge: string | null
-  credits: Credits
 }
 
 const GENERIC_ERROR = 'Le QG ne répond pas. Réessaie dans un instant.'
@@ -23,10 +15,9 @@ const GENERIC_ERROR = 'Le QG ne répond pas. Réessaie dans un instant.'
 /**
  * Tirage des mots d'une partie (`POST /words/draw`).
  *
- * Le lot quotidien a disparu : chaque partie demande ses mots au serveur, qui
- * débite le crédit et choisit la paire. Le client ne compte donc plus rien
- * lui-même — c'est ce qui permet à un même compte de retrouver ses crédits
- * d'un appareil à l'autre.
+ * Chaque partie demande ses mots au serveur, qui choisit la paire selon le
+ * thème, le registre (hot) et la difficulté demandés — le jeu est gratuit,
+ * il n'y a donc plus de crédit ni de verrou à gérer côté client.
  */
 export function createWords(options: {
   request: (path: string, init?: RequestInit) => Promise<Response>
@@ -55,9 +46,9 @@ export function createWords(options: {
 
   /**
    * Demande les mots d'une partie. Rend `null` en cas d'échec : l'appelant ne
-   * doit surtout pas démarrer la partie, le crédit n'ayant pas été débité.
+   * doit surtout pas démarrer la partie.
    */
-  async function draw(mode: ModeId, theme: ThemeId): Promise<DrawResponse | null> {
+  async function draw(theme: ThemeId, spicy: boolean, difficulty: DifficultyId): Promise<DrawResponse | null> {
     status.value = 'drawing'
     error.value = null
     errorKind.value = null
@@ -66,7 +57,7 @@ export function createWords(options: {
     try {
       response = await options.request('/words/draw', {
         method: 'POST',
-        body: JSON.stringify({ mode, theme })
+        body: JSON.stringify({ theme, spicy, difficulty })
       })
     }
     catch {
@@ -75,10 +66,6 @@ export function createWords(options: {
 
     if (!response.ok) {
       const message = await messageOf(response)
-      // 402 : plus de crédit ; 403 : mode ou thème verrouillé. Deux impasses
-      // très différentes pour le joueur, d'où deux issues distinctes.
-      if (response.status === 402) return fail('credits', message)
-      if (response.status === 403) return fail('locked', message)
       return fail('unavailable', message)
     }
 

@@ -1,6 +1,6 @@
 import { ref, shallowRef } from 'vue'
 import { io as ioClient, type Socket } from 'socket.io-client'
-import type { ModeId, ThemeId } from './useEntitlements'
+import type { DifficultyId, ThemeId } from './useEntitlements'
 
 export type Role = 'civil' | 'undercover'
 
@@ -18,7 +18,7 @@ export interface OnlinePlayer {
 }
 
 export type RoomPhase
-  = 'lobby' | 'reveal' | 'describe' | 'bets' | 'vote' | 'elimination' | 'victory'
+  = 'lobby' | 'reveal' | 'describe' | 'vote' | 'elimination' | 'victory'
 
 export interface RoomVoteRow {
   voterId: string
@@ -30,11 +30,10 @@ export interface RoomState {
   roomId: string
   code: string
   phase: RoomPhase
-  mode: ModeId
   theme: ThemeId
+  spicy: boolean
+  difficulty: DifficultyId
   undercoverCount: number | null
-  timerSeconds: number | null
-  challenge: string | null
   round: number
   attempt: number
   speakerIndex: number
@@ -138,14 +137,15 @@ export function createRoomSocket(options: {
 
   async function createRoom(
     displayName: string,
-    mode?: ModeId,
-    theme?: ThemeId
+    theme?: ThemeId,
+    spicy?: boolean,
+    difficulty?: DifficultyId
   ): Promise<RoomJoinResult | null> {
     error.value = null
     try {
       const response = await options.request('/rooms', {
         method: 'POST',
-        body: JSON.stringify({ displayName, mode, theme })
+        body: JSON.stringify({ displayName, theme, spicy, difficulty })
       })
       if (!response.ok) {
         error.value = await messageOf(response)
@@ -238,10 +238,10 @@ export function createRoomSocket(options: {
   }
 
   function configureRoom(patch: {
-    mode?: ModeId
     theme?: ThemeId
+    spicy?: boolean
+    difficulty?: DifficultyId
     undercoverCount?: number
-    timerSeconds?: number
   }): void {
     emit('room:configure', patch)
   }
@@ -256,10 +256,6 @@ export function createRoomSocket(options: {
 
   function nextSpeaker(): void {
     emit('describe:next')
-  }
-
-  function placeBet(targetPlayerId: string, stakeCents: number): void {
-    emit('bets:place', { targetPlayerId, stakeCents })
   }
 
   function castVote(targetPlayerId: string): void {
@@ -291,7 +287,6 @@ export function createRoomSocket(options: {
     start,
     ackReveal,
     nextSpeaker,
-    placeBet,
     castVote,
     continueAfterElimination,
     replay,

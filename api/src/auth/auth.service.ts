@@ -288,14 +288,12 @@ export class AuthService {
 
     const subject = userSubject(userId).key;
 
-    // `daily_usage` et `content_draws` ne portent pas de clé étrangère vers
-    // `users` — leur colonne `subject` couvre aussi les appareils anonymes — et
-    // la cascade ne les emporte donc pas. Il faut les nommer, sinon la
-    // consommation et l'historique de tirage du compte survivraient à son
-    // effacement. Le reste (sessions, packs, portefeuille, photo) part en
-    // cascade depuis `users`.
+    // `content_draws` ne porte pas de clé étrangère vers `users` — sa colonne
+    // `subject` couvre aussi les appareils anonymes — et la cascade ne l'emporte
+    // donc pas. Il faut la nommer, sinon l'historique de tirage du compte
+    // survivrait à son effacement. Le reste (sessions, photo) part en cascade
+    // depuis `users`.
     await this.prisma.$transaction([
-      this.prisma.dailyUsage.deleteMany({ where: { subject } }),
       this.prisma.contentDraw.deleteMany({ where: { subject } }),
       this.prisma.user.delete({ where: { id: userId } }),
     ]);

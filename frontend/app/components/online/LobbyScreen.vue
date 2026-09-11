@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { Check, Copy, LogOut, Minus, Plus } from '@lucide/vue'
 import { MAX_PLAYERS, MIN_PLAYERS, maxUndercovers } from '../../composables/useGame'
 import type { OnlinePlayer } from '../../composables/useRoomSocket'
-import type { ThemeCard, ThemeId } from '../../composables/useEntitlements'
+import type { DifficultyCard, DifficultyId, ThemeCard, ThemeId } from '../../composables/useEntitlements'
 
 const props = withDefaults(defineProps<{
   code: string
@@ -12,19 +12,22 @@ const props = withDefaults(defineProps<{
   viewerPlayerId: string
   isHost: boolean
   theme: ThemeId
+  spicy: boolean
+  difficulty: DifficultyId
   undercoverCount: number | null
   themes?: ThemeCard[]
+  difficulties?: DifficultyCard[]
   error?: string | null
 }>(), {
   themes: () => [],
+  difficulties: () => [],
   error: null
 })
 
 const emit = defineEmits<{
   start: []
-  configure: [{ theme?: ThemeId, undercoverCount?: number }]
+  configure: [{ theme?: ThemeId, spicy?: boolean, difficulty?: DifficultyId, undercoverCount?: number }]
   leave: []
-  boutique: []
 }>()
 
 const themesOpen = ref(false)
@@ -46,11 +49,6 @@ const canStart = computed(
 function setUndercoverCount(count: number) {
   if (count < 1 || count > undercoverCeiling.value) return
   emit('configure', { undercoverCount: count })
-}
-
-function onThemeLocked() {
-  themesOpen.value = false
-  emit('boutique')
 }
 
 async function copyLink() {
@@ -106,11 +104,28 @@ async function copyLink() {
 
     <template v-if="isHost">
       <Card class="flex flex-col gap-3">
-        <div>
-          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Dossier thématique</div>
-          <div class="mt-0.5 font-mono text-caption text-tertiary">Mode Classique — le seul disponible en ligne pour l'instant.</div>
-        </div>
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Dossier thématique</div>
         <ThemeButton :theme="currentTheme" :disabled="themes.length === 0" @open="themesOpen = true" />
+      </Card>
+
+      <Card class="flex items-center justify-between gap-4">
+        <div>
+          <div class="font-display text-body-s uppercase tracking-caps text-secondary">Contenu hot</div>
+          <div class="mt-0.5 font-mono text-caption text-tertiary">Mots nettement plus osés. Réservé aux adultes.</div>
+        </div>
+        <SpicyToggle
+          :model-value="spicy"
+          @update:model-value="(next: boolean) => emit('configure', { spicy: next })"
+        />
+      </Card>
+
+      <Card class="flex flex-col gap-3">
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Difficulté</div>
+        <DifficultySlider
+          :model-value="difficulty"
+          :difficulties="difficulties"
+          @update:model-value="(next: DifficultyId) => emit('configure', { difficulty: next })"
+        />
       </Card>
 
       <Card class="flex items-center justify-between gap-4">
@@ -155,7 +170,6 @@ async function copyLink() {
       :open="themesOpen"
       :themes="themes"
       @close="themesOpen = false"
-      @locked="onThemeLocked"
       @update:model-value="(next: ThemeId) => emit('configure', { theme: next })"
     />
   </div>

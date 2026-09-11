@@ -1,19 +1,18 @@
 import {
+  BadRequestException,
   HttpException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import {
-  MODES,
+  DIFFICULTIES,
+  DIFFICULTY_IDS,
   THEMES,
-  type ModeId,
+  THEME_IDS,
+  type DifficultyId,
   type ThemeId,
 } from '../entitlements/catalog';
-import {
-  EntitlementsService,
-  type CreditsDto,
-} from '../entitlements/entitlements.service';
 import type { Subject } from '../entitlements/subject';
 import { PrismaService } from '../prisma/prisma.service';
 import { isUniqueViolation } from '../prisma/prisma.errors';
@@ -26,9 +25,6 @@ export interface WordPairDto {
 
 export interface DrawDto {
   pair: WordPairDto;
-  /** Rempli seulement en mode défi. */
-  challenge: string | null;
-  credits: CreditsDto;
 }
 
 /**
@@ -62,29 +58,27 @@ export class WordsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly entitlements: EntitlementsService,
     private readonly llm: LlmClient,
   ) {}
 
-  /**
-   * Sert une partie : contrôle des droits, débit du crédit, puis tirage.
-   *
-   * Le crédit est débité **avant** la génération pour que le plafond reste
-   * atomique (voir `consumeCredit`) ; en échange, tout échec en aval est
-   * remboursé — une panne du fournisseur LLM ne doit pas coûter une partie.
-   */
-  async draw(subject: Subject, mode: ModeId, theme: ThemeId): Promise<DrawDto> {
-    await this.entitlements.assertCanPlay(subject, mode, theme);
+  /** Sert une partie : validation puis tirage, sans notion de droits ni de crédit. */
+  async draw(
+    subject: Subject,
+    theme: ThemeId,
+    spicy: boolean,
+    difficulty: DifficultyId,
+  ): Promise<DrawDto> {
+    if (!THEME_IDS.includes(theme)) {
+      throw new BadRequestException(`Thème inconnu : ${theme}.`);
+    }
+    if (!DIFFICULTY_IDS.includes(difficulty)) {
+      throw new BadRequestException(`Difficulté inconnue : ${difficulty}.`);
+    }
 
-    const spend = await this.entitlements.consumeCredit(subject);
     try {
-      const spicy = MODES[mode].spicy === true;
-      const pair = await this.drawPair(subject, theme, spicy);
-      const challenge =
-        mode === 'defi' ? await this.drawChallenge(subject) : null;
-      return { pair, challenge, credits: spend.credits };
+      const pair = await this.drawPair(subject, theme, spicy, difficulty);
+      return { pair };
     } catch (error) {
-      await this.entitlements.refundCredit(subject, spend.from);
       throw this.playerFacing(error);
     }
   }
@@ -111,14 +105,16 @@ export class WordsService {
     subject: Subject,
     theme: ThemeId,
     spicy: boolean,
+    difficulty: DifficultyId,
   ): Promise<WordPairDto> {
-    const seen = await this.recentlyDrawn(subject, 'pair');
-    const where = { theme, spicy, id: { notIn: seen } };
+    const level = DIFFICULTIES[difficulty].level;
+    const seen = await this.recentlyDrawn(subject);
+    const where = { theme, spicy, difficulty: level, id: { notIn: seen } };
 
     let available = await this.prisma.wordPair.count({ where });
     if (available === 0) {
-      await this.fillPool(`pair:${theme}:${spicy}`, () =>
-        this.generatePairs(theme, spicy),
+      await this.fillPool(`pair:${theme}:${spicy}:${level}`, () =>
+        this.generatePairs(theme, spicy, difficulty),
       );
       available = await this.prisma.wordPair.count({ where });
     }
@@ -141,13 +137,18 @@ export class WordsService {
       );
     }
 
-    await this.markDrawn(subject, 'pair', row.id);
+    await this.markDrawn(subject, row.id);
     return { a: row.wordA, b: row.wordB };
   }
 
-  private async generatePairs(theme: ThemeId, spicy: boolean): Promise<void> {
+  private async generatePairs(
+    theme: ThemeId,
+    spicy: boolean,
+    difficulty: DifficultyId,
+  ): Promise<void> {
+    const level = DIFFICULTIES[difficulty].level;
     const recent = await this.prisma.wordPair.findMany({
-      where: { theme, spicy },
+      where: { theme, spicy, difficulty: level },
       orderBy: { createdAt: 'desc' },
       take: AVOID_SAMPLE,
       select: { wordA: true, wordB: true },
@@ -155,7 +156,7 @@ export class WordsService {
     const avoid = recent.flatMap((row) => [row.wordA, row.wordB]);
 
     const pairs = this.parsePairs(
-      await this.llm.complete(this.pairPrompt(theme, spicy, avoid)),
+      await this.llm.complete(this.pairPrompt(theme, spicy, difficulty, avoid)),
     );
 
     // `skipDuplicates` : deux instances peuvent générer le même mot au même
@@ -164,17 +165,23 @@ export class WordsService {
       data: pairs.map((pair) => ({
         theme,
         spicy,
+        difficulty: level,
         wordA: pair.a,
         wordB: pair.b,
       })),
       skipDuplicates: true,
     });
     this.logger.log(
-      `${pairs.length} paires générées (thème ${theme}${spicy ? ', hot' : ''})`,
+      `${pairs.length} paires générées (thème ${theme}${spicy ? ', hot' : ''}, difficulté ${difficulty})`,
     );
   }
 
-  private pairPrompt(theme: ThemeId, spicy: boolean, avoid: string[]): string {
+  private pairPrompt(
+    theme: ThemeId,
+    spicy: boolean,
+    difficulty: DifficultyId,
+    avoid: string[],
+  ): string {
     const registre = spicy
       ? 'Registre volontairement osé, pour une soirée entre adultes consentants : ' +
         'séduction, sorties nocturnes, situations coquines, sous-entendus. ' +
@@ -190,9 +197,8 @@ export class WordsService {
 
     return (
       `Génère exactement ${BATCH_SIZE} paires de mots français pour le jeu Undercover. ` +
-      'Chaque paire contient deux termes proches mais bien distincts ' +
-      '(ex. « Café » / « Thé », « Passeport » / « Visa ») : assez semblables pour que ' +
-      "l'undercover puisse se fondre dans les descriptions, assez différents pour être démasquable. " +
+      DIFFICULTIES[difficulty].prompt +
+      ' ' +
       registre +
       avoidClause +
       '\nRéponds UNIQUEMENT avec un tableau JSON, sans texte autour, au format : ' +
@@ -228,83 +234,6 @@ export class WordsService {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Défis                                                               */
-  /* ------------------------------------------------------------------ */
-
-  private async drawChallenge(subject: Subject): Promise<string> {
-    const seen = await this.recentlyDrawn(subject, 'challenge');
-    const where = { id: { notIn: seen } };
-
-    let available = await this.prisma.challenge.count({ where });
-    if (available === 0) {
-      await this.fillPool('challenge', () => this.generateChallenges());
-      available = await this.prisma.challenge.count({ where });
-    }
-    if (available === 0) {
-      throw new ServiceUnavailableException(
-        'Le QG n’arrive pas à préparer de défi. Réessaie dans quelques instants.',
-      );
-    }
-
-    const [row] = await this.prisma.challenge.findMany({
-      where,
-      skip: Math.floor(Math.random() * available),
-      take: 1,
-    });
-    if (!row) {
-      throw new ServiceUnavailableException(
-        'Le QG n’arrive pas à préparer de défi. Réessaie dans quelques instants.',
-      );
-    }
-
-    await this.markDrawn(subject, 'challenge', row.id);
-    return row.text;
-  }
-
-  private async generateChallenges(): Promise<void> {
-    const recent = await this.prisma.challenge.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: AVOID_SAMPLE,
-      select: { text: true },
-    });
-
-    const avoidClause =
-      recent.length > 0
-        ? `\nDéfis déjà écrits, à ne pas répéter : ${recent.map((row) => row.text).join(' / ')}.`
-        : '';
-
-    const prompt =
-      `Génère exactement ${BATCH_SIZE} défis pour une partie du jeu Undercover. ` +
-      'Un défi est une contrainte de parole que TOUS les joueurs tiennent pendant toute la partie, ' +
-      'en plus des règles normales (ex. « Chaque description doit contenir une couleur », ' +
-      '« Interdiction d’utiliser un verbe à l’infinitif », « Parle toujours à la troisième personne »). ' +
-      'Il doit rester vérifiable à l’oreille, tenir en une phrase courte, et ne jamais obliger à révéler son mot.' +
-      avoidClause +
-      '\nRéponds UNIQUEMENT avec un tableau JSON de chaînes, sans texte autour : ["Défi 1", "Défi 2", …]';
-
-    const texts: string[] = [];
-    const seen = new Set<string>();
-    for (const item of parseJsonArray(await this.llm.complete(prompt))) {
-      if (typeof item !== 'string') continue;
-      const text = item.trim();
-      if (!text) continue;
-      const key = text.toLocaleLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      texts.push(text);
-    }
-    if (texts.length === 0) {
-      throw new Error('Réponse LLM : aucun défi exploitable');
-    }
-
-    await this.prisma.challenge.createMany({
-      data: texts.map((text) => ({ text })),
-      skipDuplicates: true,
-    });
-    this.logger.log(`${texts.length} défis générés`);
-  }
-
-  /* ------------------------------------------------------------------ */
   /* Pool                                                                */
   /* ------------------------------------------------------------------ */
 
@@ -323,12 +252,9 @@ export class WordsService {
   }
 
   /** Identifiants récemment servis à ce sujet, pour ne pas les resservir. */
-  private async recentlyDrawn(
-    subject: Subject,
-    kind: 'pair' | 'challenge',
-  ): Promise<string[]> {
+  private async recentlyDrawn(subject: Subject): Promise<string[]> {
     const rows = await this.prisma.contentDraw.findMany({
-      where: { subject: subject.key, kind },
+      where: { subject: subject.key, kind: 'pair' },
       orderBy: { drawnAt: 'desc' },
       take: RECENT_DRAWS,
       select: { refId: true },
@@ -336,14 +262,10 @@ export class WordsService {
     return rows.map((row) => row.refId);
   }
 
-  private async markDrawn(
-    subject: Subject,
-    kind: 'pair' | 'challenge',
-    refId: string,
-  ): Promise<void> {
+  private async markDrawn(subject: Subject, refId: string): Promise<void> {
     try {
       await this.prisma.contentDraw.create({
-        data: { subject: subject.key, kind, refId },
+        data: { subject: subject.key, kind: 'pair', refId },
       });
     } catch (error) {
       // Déjà noté (le contenu était sorti de la fenêtre récente) : sans

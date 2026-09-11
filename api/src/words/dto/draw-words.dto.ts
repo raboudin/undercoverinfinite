@@ -1,8 +1,8 @@
-import { IsIn, IsOptional } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional } from 'class-validator';
 import {
-  MODE_IDS,
+  DIFFICULTY_IDS,
   THEME_IDS,
-  type ModeId,
+  type DifficultyId,
   type ThemeId,
 } from '../../entitlements/catalog';
 
@@ -12,11 +12,18 @@ import {
  * ce qui interdit de glisser un thème par un chemin détourné.
  */
 export class DrawWordsDto {
-  @IsIn([...MODE_IDS], { message: 'Mode de jeu inconnu.' })
-  mode!: ModeId;
-
   /** Facultatif : sans thème, la partie se joue en « Tous horizons ». */
   @IsOptional()
   @IsIn([...THEME_IDS], { message: 'Thème inconnu.' })
   theme?: ThemeId;
+
+  /** Contenu hot, indépendant du thème. Absent = registre normal. */
+  @IsOptional()
+  @IsBoolean()
+  spicy?: boolean;
+
+  /** Facultatif : sans difficulté, la partie se joue en « Normal ». */
+  @IsOptional()
+  @IsIn([...DIFFICULTY_IDS], { message: 'Difficulté inconnue.' })
+  difficulty?: DifficultyId;
 }

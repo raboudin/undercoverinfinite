@@ -31,8 +31,6 @@ model User {
   updatedAt    DateTime @updatedAt
 
   refreshTokens RefreshToken[]
-  entitlements  Entitlement[]
-  wallet        CreditWallet?
   avatar        UserAvatar?
 
   @@map("users")
@@ -77,90 +75,30 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
-// Pack débloqué, rattaché au compte. Aujourd'hui tous les packs se débloquent
-// gratuitement (`source = "free"`) ; le jour où le paiement arrive, seule la
-// valeur de `source` et le remplissage de `externalRef` (id de transaction)
-// changent — rien du côté lecture, qui ne regarde que `pack`.
-// L'unicité (userId, pack) rend le déblocage idempotent : re-cliquer n'ouvre
-// pas une seconde ligne.
-model Entitlement {
-  id          String   @id @default(cuid())
-  userId      String
-  pack        String
-  source      String   @default("free")
-  externalRef String?
-  createdAt   DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, pack])
-  @@index([userId])
-  @@map("entitlements")
-}
-
-// Solde de crédits achetés (pack « 20 crédits »), qui ne se réinitialise pas
-// chaque jour. Il n'est entamé qu'une fois le quota quotidien épuisé, sinon
-// une recharge fondrait en même temps que des crédits gratuits.
-// Réservé aux comptes : un solde attaché à un appareil se perdrait au premier
-// vidage de cookies, et se dupliquerait au premier navigateur privé.
-model CreditWallet {
-  userId    String   @id
-  balance   Int      @default(0)
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("credit_wallets")
-}
-
-// Consommation du jour, par sujet et par date (Europe/Paris). C'est cette
-// table qui fait autorité sur le quota, pas le compteur localStorage du
-// client : celui-ci ne sert plus qu'à afficher un reste sans rappeler l'API.
-// `subject` vaut `user:<id>` pour un compte et `device:<uuid>` pour un
-// visiteur anonyme (cookie `device_id`) — un même identifiant de colonne pour
-// les deux, ce qui évite de dupliquer toute la logique de quota.
-model DailyUsage {
-  id      String   @id @default(cuid())
-  subject String
-  day     DateTime @db.Date
-  used    Int      @default(0)
-
-  @@unique([subject, day])
-  @@map("daily_usage")
-}
-
 // Paires de mots générées par LLM, mutualisées entre tous les joueurs et
 // rangées par thème. Elles ne sont plus produites par un cron quotidien mais à
 // la demande, quand un tirage ne trouve plus de paire inédite pour le
 // demandeur — un appel LLM sert donc plusieurs parties au lieu d'une.
-// `spicy` isole les mots du mode hot : même thème, registre différent.
+// `spicy` isole les mots du registre hot (indépendant du thème) ; `difficulty`
+// (1 à 5, cf. `entitlements/catalog.ts` DIFFICULTY_IDS) isole les mots par
+// éloignement sémantique voulu de la paire.
 model WordPair {
-  id        String   @id @default(cuid())
-  theme     String
-  spicy     Boolean  @default(false)
-  wordA     String
-  wordB     String
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  theme      String
+  spicy      Boolean  @default(false)
+  difficulty Int      @default(3)
+  wordA      String
+  wordB      String
+  createdAt  DateTime @default(now())
 
-  @@unique([theme, spicy, wordA, wordB])
-  @@index([theme, spicy])
+  @@unique([theme, spicy, difficulty, wordA, wordB])
+  @@index([theme, spicy, difficulty])
   @@map("word_pairs")
 }
 
-// Défis du mode défi, remplis par le même mécanisme de pool que les paires.
-model Challenge {
-  id        String   @id @default(cuid())
-  text      String   @unique
-  createdAt DateTime @default(now())
-
-  @@map("challenges")
-}
-
-// Ce qu'un sujet a déjà reçu, tous contenus confondus (`kind` = "pair" ou
-// "challenge"). Une seule table générique plutôt qu'une par type : la logique
-// de tirage sans redite est rigoureusement la même des deux côtés.
-// Pas de clé étrangère vers WordPair/Challenge — ces contenus ne sont jamais
-// supprimés, et une contrainte par `kind` n'est de toute façon pas exprimable.
+// Ce qu'un sujet a déjà reçu (`kind` = "pair"). Pas de clé étrangère vers
+// WordPair — ce contenu n'est jamais supprimé, et une contrainte par `kind`
+// n'est de toute façon pas exprimable.
 model ContentDraw {
   id      String   @id @default(cuid())
   subject String
@@ -184,26 +122,26 @@ model ContentDraw {
 // création pour un bénéfice nul (un salon naît toujours avec son hôte dans la
 // même transaction). L'intégrité est assurée par le service, pas par la base.
 //
-// Les états (`phase`, `mode`, `theme`, `winner`) restent des `String`, comme
-// partout ailleurs dans ce schéma (cf. `ContentDraw.kind`) — pas d'enum Prisma.
+// Les états (`phase`, `theme`, `winner`) restent des `String`, comme partout
+// ailleurs dans ce schéma (cf. `ContentDraw.kind`) — pas d'enum Prisma.
 model Room {
-  id                     String   @id @default(cuid())
-  code                   String   @unique
-  hostPlayerId           String?
+  id           String  @id @default(cuid())
+  code         String  @unique
+  hostPlayerId String?
 
-  /// lobby | reveal | describe | bets | vote | elimination | victory
-  phase                  String   @default("lobby")
-  mode                   String   @default("classique")
-  theme                  String   @default("general")
-  undercoverCount        Int?
-  timerSeconds           Int?
-  challenge              String?
+  /// lobby | reveal | describe | vote | elimination | victory
+  phase           String  @default("lobby")
+  theme           String  @default("general")
+  spicy           Boolean @default(false)
+  /// 1 (évident) à 5 (farfelu), cf. `entitlements/catalog.ts` DIFFICULTY_IDS.
+  difficulty      Int     @default(3)
+  undercoverCount Int?
 
-  round                  Int      @default(0)
+  round        Int @default(0)
   /// Tentative de vote au sein de la manche courante — incrémentée à chaque
   /// égalité (plafonnée à 3, cf. `engine/voting.ts`), jamais à un tour normal.
-  attempt                Int      @default(1)
-  speakerIndex           Int      @default(0)
+  attempt      Int @default(1)
+  speakerIndex Int @default(0)
 
   lastEliminatedPlayerId String?
   /// civils | undercovers, rempli seulement en phase victory
@@ -212,10 +150,10 @@ model Room {
   /// Incrémenté à chaque nouvelle distribution (lancement ou replay) : sert de
   /// clé défensive pour ne jamais mélanger les votes d'une manche rejouée avec
   /// ceux de la précédente, sans avoir à les purger.
-  dealNumber             Int      @default(1)
+  dealNumber Int @default(1)
 
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   players RoomPlayer[]
   votes   RoomVote[]
@@ -224,42 +162,44 @@ model Room {
 }
 
 // Un joueur dans une salle. `subjectKey` est le `Subject.key` de
-// `entitlements/subject.ts` (`user:<id>` ou `device:<uuid>`) — utile
-// uniquement pour savoir QUI PAIE (l'hôte) et préremplir le nom depuis le
-// dossier ; ce n'est PAS la clé de reconnexion (voir `playerTokenHash`), donc
-// aucune contrainte d'unicité dessus : deux onglets du même appareil peuvent
-// tout à fait être deux agents différents à la même table.
+// `entitlements/subject.ts` (`user:<id>` ou `device:<uuid>`) — utile pour
+// dédupliquer les tirages de mots par joueur (`ContentDraw`) et préremplir le
+// nom depuis le dossier ; ce n'est PAS la clé de reconnexion (voir
+// `playerTokenHash`), donc aucune contrainte d'unicité dessus : deux onglets
+// du même appareil peuvent tout à fait être deux agents différents à la même
+// table.
 //
 // `role`/`word` sont nuls tant que la partie n'a pas démarré, puis réécrits en
 // place à chaque nouvelle distribution (pas de nouvelle ligne par manche) :
 // ce salon n'a pas vocation à garder un historique de parties, seulement
 // l'état de la partie en cours.
 model RoomPlayer {
-  id              String   @id @default(cuid())
-  roomId          String
-  subjectKey      String
-  displayName     String
-  isHost          Boolean  @default(false)
+  id          String  @id @default(cuid())
+  roomId      String
+  subjectKey  String
+  displayName String
+  isHost      Boolean @default(false)
 
   /// Assigné au lancement (ordre d'arrivée en salle) ; sert à dériver le même
   /// ordre de parole tournant que `speakingOrder` côté local.
-  seat            Int?
+  seat Int?
 
-  role            String?
-  word            String?
-  alive           Boolean  @default(true)
-  hasSeenReveal   Boolean  @default(false)
+  role          String?
+  word          String?
+  alive         Boolean @default(true)
+  hasSeenReveal Boolean @default(false)
 
-  connected       Boolean  @default(false)
+  connected Boolean @default(false)
 
   /// Jeton opaque de reconnexion, jamais stocké en clair (même idiome que
   /// `RefreshToken.tokenHash` : SHA-256 nu, l'aléa du jeton suffit). Distinct
-  /// du cookie `device_id` : celui-ci identifie un APPAREIL pour le quota de
-  /// crédits, celui-là identifie UN SIÈGE dans UNE salle et vit côté client en
-  /// `localStorage` (c'est le socket qui le lit, pas une route Express).
-  playerTokenHash String   @unique
+  /// du cookie `device_id` : celui-ci identifie un APPAREIL (dédup des mots
+  /// déjà tirés), celui-là identifie UN SIÈGE dans UNE salle et vit côté
+  /// client en `localStorage` (c'est le socket qui le lit, pas une route
+  /// Express).
+  playerTokenHash String @unique
 
-  joinedAt        DateTime @default(now())
+  joinedAt DateTime @default(now())
 
   room          Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
   votesCast     RoomVote[] @relation("VoterVotes")

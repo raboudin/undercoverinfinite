@@ -8,7 +8,14 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { TokenService } from '../auth/token.service';
-import { DEFAULT_THEME, type ModeId, type ThemeId } from '../entitlements/catalog';
+import {
+  DEFAULT_DIFFICULTY,
+  DEFAULT_THEME,
+  difficultyFromLevel,
+  difficultyLevel,
+  type DifficultyId,
+  type ThemeId,
+} from '../entitlements/catalog';
 import type { Subject } from '../entitlements/subject';
 import { PrismaService } from '../prisma/prisma.service';
 import { isUniqueViolation } from '../prisma/prisma.errors';
@@ -21,15 +28,6 @@ import { checkVictory } from './engine/victory';
 import { resolveVotes } from './engine/voting';
 import { redactPlayers, type RedactedPlayer } from './redaction';
 import { generateRoomCode } from './room-code';
-
-/**
- * Le mode en ligne ne couvre pour l'instant que la boucle classique de bout en
- * bout (lobby → révélation → description → vote → élimination → victoire).
- * Chrono (minuteur serveur), défi et pari (mise simultanée) sont prévus mais
- * pas encore branchés — les autoriser ici ferait avancer une salle vers une
- * phase que rien ne sait résoudre.
- */
-const ONLINE_ENABLED_MODES: ModeId[] = ['classique'];
 
 export interface RoomJoinResult {
   code: string;
@@ -51,11 +49,10 @@ export interface RoomStateView {
   roomId: string;
   code: string;
   phase: string;
-  mode: string;
   theme: string;
+  spicy: boolean;
+  difficulty: DifficultyId;
   undercoverCount: number | null;
-  timerSeconds: number | null;
-  challenge: string | null;
   round: number;
   attempt: number;
   speakerIndex: number;
@@ -82,14 +79,6 @@ function subjectFromKey(key: string): Subject {
   return { key, userId: key.startsWith('user:') ? key.slice('user:'.length) : null };
 }
 
-function assertModeEnabled(mode: string): void {
-  if (!ONLINE_ENABLED_MODES.includes(mode as ModeId)) {
-    throw new BadRequestException(
-      'Seul le mode Classique est disponible en ligne pour l’instant.',
-    );
-  }
-}
-
 @Injectable()
 export class RoomsService {
   constructor(
@@ -104,8 +93,9 @@ export class RoomsService {
   async createRoom(
     subject: Subject,
     displayName: string,
-    mode?: ModeId,
     theme?: ThemeId,
+    spicy?: boolean,
+    difficulty?: DifficultyId,
   ): Promise<RoomJoinResult> {
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = generateRoomCode();
@@ -114,7 +104,12 @@ export class RoomsService {
       try {
         const player = await this.prisma.$transaction(async (tx) => {
           const room = await tx.room.create({
-            data: { code, mode: mode ?? 'classique', theme: theme ?? DEFAULT_THEME },
+            data: {
+              code,
+              theme: theme ?? DEFAULT_THEME,
+              spicy: spicy ?? false,
+              difficulty: difficultyLevel(difficulty ?? DEFAULT_DIFFICULTY),
+            },
           });
           const created = await tx.roomPlayer.create({
             data: {
@@ -251,11 +246,10 @@ export class RoomsService {
       roomId: room.id,
       code: room.code,
       phase: room.phase,
-      mode: room.mode,
       theme: room.theme,
+      spicy: room.spicy,
+      difficulty: difficultyFromLevel(room.difficulty),
       undercoverCount: room.undercoverCount,
-      timerSeconds: room.timerSeconds,
-      challenge: room.challenge,
       round: room.round,
       attempt: room.attempt,
       speakerIndex: room.speakerIndex,
@@ -283,7 +277,6 @@ export class RoomsService {
     if (room.phase !== 'lobby') {
       throw new ForbiddenException('La configuration est verrouillée une fois la partie lancée.');
     }
-    if (dto.mode) assertModeEnabled(dto.mode);
 
     if (dto.undercoverCount !== undefined) {
       const playerCount = await this.prisma.roomPlayer.count({ where: { roomId } });
@@ -294,10 +287,10 @@ export class RoomsService {
     await this.prisma.room.update({
       where: { id: roomId },
       data: {
-        ...(dto.mode ? { mode: dto.mode } : {}),
         ...(dto.theme ? { theme: dto.theme } : {}),
+        ...(dto.spicy !== undefined ? { spicy: dto.spicy } : {}),
+        ...(dto.difficulty ? { difficulty: difficultyLevel(dto.difficulty) } : {}),
         ...(dto.undercoverCount !== undefined ? { undercoverCount: dto.undercoverCount } : {}),
-        ...(dto.timerSeconds !== undefined ? { timerSeconds: dto.timerSeconds } : {}),
       },
     });
   }
@@ -311,7 +304,6 @@ export class RoomsService {
     const actor = await this.prisma.roomPlayer.findUniqueOrThrow({ where: { id: actorPlayerId } });
     if (!actor.isHost) throw new ForbiddenException('Seul l’hôte lance la partie.');
     if (room.phase !== 'lobby') throw new ForbiddenException('La partie est déjà lancée.');
-    assertModeEnabled(room.mode);
 
     const players = await this.prisma.roomPlayer.findMany({
       where: { roomId },
@@ -328,8 +320,9 @@ export class RoomsService {
     const host = players.find((player) => player.id === actor.id)!;
     const draw = await this.words.draw(
       subjectFromKey(host.subjectKey),
-      room.mode as ModeId,
       room.theme as ThemeId,
+      room.spicy,
+      difficultyFromLevel(room.difficulty),
     );
 
     const assignments = dealRoles(
@@ -361,7 +354,6 @@ export class RoomsService {
           lastEliminatedPlayerId: null,
           winner: null,
           undercoverCount,
-          challenge: draw.challenge,
         },
       }),
     ]);
@@ -380,8 +372,9 @@ export class RoomsService {
     const host = players.find((player) => player.id === actor.id)!;
     const draw = await this.words.draw(
       subjectFromKey(host.subjectKey),
-      room.mode as ModeId,
       room.theme as ThemeId,
+      room.spicy,
+      difficultyFromLevel(room.difficulty),
     );
 
     const assignments = dealRoles(
@@ -412,7 +405,6 @@ export class RoomsService {
           lastEliminatedPlayerId: null,
           winner: null,
           dealNumber: { increment: 1 },
-          challenge: draw.challenge,
         },
       }),
     ]);
@@ -471,14 +463,9 @@ export class RoomsService {
       return;
     }
 
-    // Le mode pari (mise avant l'ouverture du vote) n'est pas encore branché
-    // en ligne (voir ONLINE_ENABLED_MODES) : la phase 'bets' n'est jamais
-    // atteinte tant que seul 'classique' est autorisé, mais la bascule reste
-    // écrite pour ne pas avoir à retoucher ce point-là quand le pari arrivera.
-    const nextPhase = room.mode === 'pari' ? 'bets' : 'vote';
     await this.prisma.room.update({
       where: { id: roomId },
-      data: { speakerIndex: 0, phase: nextPhase },
+      data: { speakerIndex: 0, phase: 'vote' },
     });
   }
 

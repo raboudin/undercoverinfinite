@@ -7,7 +7,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   runtimeConfig: {
     public: {
-      // URL de l'API NestJS (droits, packs, tirage des mots). Surchargée en déploiement via
+      // URL de l'API NestJS (thèmes, difficultés, tirage des mots). Surchargée en déploiement via
       // NUXT_PUBLIC_API_BASE ; en dev l'API écoute sur :8000 (cf. api/.env.example).
       apiBase: 'http://localhost:8000'
     }
@@ -45,7 +45,6 @@ export default defineNuxtConfig({
     { path: '~/components/data-display', pathPrefix: false },
     { path: '~/components/feedback', pathPrefix: false },
     { path: '~/components/game', pathPrefix: false },
-    { path: '~/components/online', pathPrefix: false },
-    { path: '~/components/store', pathPrefix: false }
+    { path: '~/components/online', pathPrefix: false }
   ]
 })

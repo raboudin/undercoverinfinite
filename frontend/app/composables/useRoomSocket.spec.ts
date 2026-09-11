@@ -44,11 +44,11 @@ describe('createRoomSocket', () => {
       const request = vi.fn().mockResolvedValue(jsonResponse(JOIN_RESULT, 201))
       const room = createRoomSocket({ apiBase: 'http://api.test', request })
 
-      const result = await room.createRoom('Hôte', 'classique', 'general')
+      const result = await room.createRoom('Hôte', 'general', true, 'farfelu')
 
       expect(request).toHaveBeenCalledWith('/rooms', {
         method: 'POST',
-        body: JSON.stringify({ displayName: 'Hôte', mode: 'classique', theme: 'general' })
+        body: JSON.stringify({ displayName: 'Hôte', theme: 'general', spicy: true, difficulty: 'farfelu' })
       })
       expect(result?.code).toBe('ABC234')
       expect(localStorage.getItem('undercover:room:ABC234')).toContain('secret-token')
@@ -139,7 +139,9 @@ describe('createRoomSocket', () => {
       const payload = { phase: 'lobby', players: [] } as unknown as RoomState
       socket.trigger('room:state', payload)
 
-      expect(room.state.value).toBe(payload)
+      // `toStrictEqual`, pas `toBe` : `ref()` enveloppe un objet dans un proxy
+      // réactif, la valeur lue n'est donc plus la même référence que `payload`.
+      expect(room.state.value).toStrictEqual(payload)
       expect(room.status.value).toBe('connected')
     })
 

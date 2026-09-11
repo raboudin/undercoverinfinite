@@ -169,10 +169,12 @@ describe('Rooms (e2e)', () => {
     const tieEvents = Promise.all(
       clients.map((socket) => waitForEvent<{ tiedPlayerIds: string[] }>(socket, 'vote:tie')),
     );
-    hostSocket.emit('vote:cast', { targetPlayerId: p3 });
+    // p3 (Agent 3) et p4 (Agent 4) ne peuvent pas voter pour eux-mêmes : c'est
+    // l'hôte et p4 qui votent p4, Agent 2 et p3 qui votent p3, pour 2-2.
+    hostSocket.emit('vote:cast', { targetPlayerId: p4 });
     guestSockets[0]!.emit('vote:cast', { targetPlayerId: p3 }); // Agent 2 -> p3
-    guestSockets[1]!.emit('vote:cast', { targetPlayerId: p4 }); // Agent 3 -> p4
-    guestSockets[2]!.emit('vote:cast', { targetPlayerId: p4 }); // Agent 4 -> p4
+    guestSockets[1]!.emit('vote:cast', { targetPlayerId: p4 }); // Agent 3 (p3) -> p4
+    guestSockets[2]!.emit('vote:cast', { targetPlayerId: p3 }); // Agent 4 (p4) -> p3
 
     const ties = await tieEvents;
     expect(ties[0]!.tiedPlayerIds.sort()).toEqual([p3, p4].sort());

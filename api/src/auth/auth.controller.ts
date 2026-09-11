@@ -148,9 +148,9 @@ export class AuthController {
 
   /**
    * Suppression du compte — droit à l'effacement (RGPD). Emporte sessions,
-   * packs, portefeuille, photo, consommation quotidienne et historique de
-   * tirage. Irréversible, et les cookies sont vidés dans la foulée pour que
-   * l'onglet ne reste pas avec une session pointant vers un compte disparu.
+   * photo et historique de tirage. Irréversible, et les cookies sont vidés
+   * dans la foulée pour que l'onglet ne reste pas avec une session pointant
+   * vers un compte disparu.
    */
   @Delete('me')
   @UseGuards(JwtAuthGuard)

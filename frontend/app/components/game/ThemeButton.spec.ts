@@ -9,9 +9,7 @@ const global = { components: { ArtSlot } }
 const CULTURE: ThemeCard = {
   id: 'culture',
   label: 'Culture',
-  tagline: 'Livres, musique, scène et traditions.',
-  generalist: true,
-  unlocked: true
+  tagline: 'Livres, musique, scène et traditions.'
 }
 
 describe('ThemeButton', () => {

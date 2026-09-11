@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { createGame, type GameConfig } from '~/composables/useGame'
-import type { ThemeId } from '~/composables/useEntitlements'
+import { createGame } from '~/composables/useGame'
+import type { DifficultyId, ThemeId } from '~/composables/useEntitlements'
 import { useBackgroundMusic } from '~/composables/useBackgroundMusic'
 import { useMissionExit } from '~/composables/useMissionExit'
 import type { SetupSubmission } from '~/components/game/SetupScreen.vue'
@@ -16,20 +16,13 @@ const {
   lastEliminated,
   winner,
   error,
-  mode,
-  timerSeconds,
-  challenge,
-  alivePlayers,
   currentRevealPlayer,
   isLastReveal,
   speakingOrder,
   currentSpeaker,
-  isTimed,
-  settlement,
   configure,
   nextReveal,
   nextSpeaker,
-  placeBets,
   eliminate,
   resolveElimination,
   replaySameTeam,
@@ -40,18 +33,11 @@ const nuxtApp = useNuxtApp()
 const entitlements = nuxtApp.$entitlements
 const words = nuxtApp.$words
 
-const {
-  status: rightsStatus,
-  credits,
-  modeCards,
-  themeCards,
-  applyCredits,
-  refresh: refreshRights
-} = entitlements
-const { status: wordsStatus, error: wordsError, errorKind: wordsErrorKind } = words
+const { status: rightsStatus, themeCards, difficultyCards, refresh: refreshRights } = entitlements
+const { status: wordsStatus, error: wordsError } = words
 
-// Client uniquement : les droits dépendent de cookies que le rendu serveur ne
-// relaie pas.
+// Client uniquement : le catalogue n'a pas besoin du rendu serveur, mais
+// autant rester cohérent avec les autres plugins ($auth) qui, eux, en ont besoin.
 onMounted(() => {
   if (rightsStatus.value !== 'ready') void refreshRights()
 })
@@ -65,37 +51,32 @@ watch(missionExit, () => {
 })
 
 const drawing = computed(() => wordsStatus.value === 'drawing')
-const canReplay = computed(() => lastTheme.value !== null && credits.value.remaining > 0)
+const canReplay = computed(() => lastTeam.value !== null)
 
-/** Le dossier qui a servi à lancer la partie, pour pouvoir la rejouer. */
-const lastTheme = ref<ThemeId | null>(null)
+/** Réglages qui ont servi à lancer la partie, pour pouvoir la rejouer. */
+const lastTeam = ref<{ theme: ThemeId, spicy: boolean, difficulty: DifficultyId } | null>(null)
 
 async function start(submission: SetupSubmission) {
-  const draw = await words.draw(submission.config.mode, submission.theme)
+  const draw = await words.draw(submission.theme, submission.spicy, submission.difficulty)
   if (!draw) return
 
-  // Le serveur fait autorité sur le solde : on prend le sien plutôt que de
-  // décrémenter dans notre coin.
-  applyCredits(draw.credits)
-
-  if (configure(submission.config, { pair: draw.pair, challenge: draw.challenge })) {
-    lastTheme.value = submission.theme
+  if (configure(submission.config, { pair: draw.pair })) {
+    lastTeam.value = { theme: submission.theme, spicy: submission.spicy, difficulty: submission.difficulty }
     // Le clic est le geste utilisateur qui débloque l'autoplay du navigateur.
     void music.start()
   }
 }
 
-// Rejouer est une nouvelle partie : nouveaux mots, donc nouvelle mission
-// consommée. Le mode et l'équipe, eux, ne bougent pas.
+// Rejouer est une nouvelle partie : nouveaux mots, donc un nouveau tirage.
+// Le dossier thématique, le registre et la difficulté, eux, ne bougent pas.
 async function replay() {
-  const theme = lastTheme.value
-  if (!theme) return
+  const team = lastTeam.value
+  if (!team) return
 
-  const draw = await words.draw(mode.value, theme)
+  const draw = await words.draw(team.theme, team.spicy, team.difficulty)
   if (!draw) return
 
-  applyCredits(draw.credits)
-  replaySameTeam({ pair: draw.pair, challenge: draw.challenge })
+  replaySameTeam({ pair: draw.pair })
 }
 </script>
 
@@ -103,16 +84,13 @@ async function replay() {
   <SetupScreen
     v-if="phase === 'setup'"
     :error="error"
-    :modes="modeCards"
     :themes="themeCards"
+    :difficulties="difficultyCards"
     :status="rightsStatus"
-    :credits="rightsStatus === 'ready' ? credits : null"
     :drawing="drawing"
     :words-error="wordsError"
-    :words-error-kind="wordsErrorKind"
     @start="start"
     @retry="refreshRights"
-    @boutique="navigateTo('/boutique')"
   />
 
   <RevealScreen
@@ -130,17 +108,7 @@ async function replay() {
     :players="players"
     :order="speakingOrder"
     :speaker-index="speakerIndex"
-    :timed="isTimed"
-    :timer-seconds="timerSeconds"
-    :challenge="challenge"
     @next="nextSpeaker"
-  />
-
-  <BetScreen
-    v-else-if="phase === 'bets'"
-    :round="round"
-    :players="alivePlayers"
-    @place="placeBets"
   />
 
   <VoteScreen
@@ -162,7 +130,6 @@ async function replay() {
     :winner="winner"
     :players="players"
     :can-replay="canReplay"
-    :settlement="settlement"
     @replay="replay"
     @new-game="newGame"
   />

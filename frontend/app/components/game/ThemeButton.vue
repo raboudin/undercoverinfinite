@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronRight, Lock } from '@lucide/vue'
+import { ChevronRight } from '@lucide/vue'
 import type { ThemeCard } from '../../composables/useEntitlements'
 import { themeThumb } from '../../utils/gameArt'
 
@@ -36,7 +36,6 @@ const emit = defineEmits<{ open: [] }>()
     <span class="min-w-0 flex-1">
       <span class="block font-mono text-caption uppercase tracking-caps text-tertiary">Dossier thématique</span>
       <span class="mt-0.5 flex items-center gap-1.5">
-        <Lock v-if="theme && !theme.unlocked" :size="12" class="shrink-0 text-amber-4" />
         <span class="truncate font-display text-title uppercase tracking-caps text-primary">
           {{ theme?.label ?? 'À choisir' }}
         </span>

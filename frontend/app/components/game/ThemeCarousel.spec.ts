@@ -17,9 +17,9 @@ afterEach(() => {
 const global = { components: { ArtSlot, Button, IconButton, RoleTag } }
 
 const THEMES: ThemeCard[] = [
-  { id: 'general', label: 'Tous horizons', tagline: 'Tout le terrain.', generalist: true, unlocked: true },
-  { id: 'culture', label: 'Culture', tagline: 'Livres et musique.', generalist: true, unlocked: true },
-  { id: 'football', label: 'Football', tagline: 'Joueurs et clubs.', generalist: false, unlocked: false }
+  { id: 'general', label: 'Tous horizons', tagline: 'Tout le terrain.' },
+  { id: 'culture', label: 'Culture', tagline: 'Livres et musique.' },
+  { id: 'football', label: 'Football', tagline: 'Joueurs et clubs.' }
 ]
 
 function carousel(props: Record<string, unknown> = {}) {
@@ -157,17 +157,6 @@ describe('ThemeCarousel — choix', () => {
 
     expect(wrapper.emitted('update:modelValue')).toEqual([['culture']])
     expect(wrapper.emitted('close')).toHaveLength(1)
-  })
-
-  it('renvoie un dossier scellé vers la boutique sans le choisir', async () => {
-    const wrapper = carousel({ modelValue: 'football' })
-
-    expect(dialog()).toContain('Débloquer dans la boutique')
-    await actionButton().trigger('click')
-
-    expect(wrapper.emitted('locked')).toEqual([['football']])
-    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
-    expect(wrapper.emitted('close')).toBeUndefined()
   })
 
   it('se ferme depuis l’en-tête', async () => {

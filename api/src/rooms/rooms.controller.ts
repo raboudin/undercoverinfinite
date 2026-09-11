@@ -36,8 +36,9 @@ export class RoomsController {
     return this.rooms.createRoom(
       resolveSubject(req, res, this.config),
       dto.displayName,
-      dto.mode,
       dto.theme,
+      dto.spicy,
+      dto.difficulty,
     );
   }
 

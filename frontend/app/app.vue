@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ShoppingBag, Users, Volume2, VolumeX } from '@lucide/vue'
+import { Users, Volume2, VolumeX } from '@lucide/vue'
 import { useBackgroundMusic } from '~/composables/useBackgroundMusic'
 import { useMissionExit } from '~/composables/useMissionExit'
 import logoMark from '~/assets/images/logo-mark.png'
@@ -41,11 +41,6 @@ const {
           <NuxtLink to="/salle" aria-label="Jouer en ligne">
             <IconButton :size="34" tabindex="-1">
               <Users :size="15" />
-            </IconButton>
-          </NuxtLink>
-          <NuxtLink to="/boutique" aria-label="Équipement">
-            <IconButton :size="34" tabindex="-1">
-              <ShoppingBag :size="15" />
             </IconButton>
           </NuxtLink>
           <IconButton

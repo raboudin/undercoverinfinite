@@ -1,64 +1,51 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { ChevronLeft, Minus, Plus } from '@lucide/vue'
-import {
-  DEFAULT_TIMER_SECONDS,
-  MAX_PLAYERS,
-  MAX_TIMER_SECONDS,
-  MIN_PLAYERS,
-  MIN_TIMER_SECONDS,
-  maxUndercovers,
-  type GameConfig
-} from '../../composables/useGame'
+import { MAX_PLAYERS, MIN_PLAYERS, maxUndercovers, type GameConfig } from '../../composables/useGame'
 import type {
-  Credits,
+  DifficultyCard,
+  DifficultyId,
   EntitlementsStatus,
-  ModeCard,
-  ModeId,
   ThemeCard,
   ThemeId
 } from '../../composables/useEntitlements'
-import type { WordsErrorKind } from '../../composables/useWords'
 import type { TableSeat } from './GameTable.vue'
 import logoFull from '../../assets/images/logo-full.png'
 
 export interface SetupSubmission {
   config: GameConfig
   theme: ThemeId
+  spicy: boolean
+  difficulty: DifficultyId
 }
 
 const props = withDefaults(defineProps<{
   error?: string | null
-  /** Modes proposés, hors DIY qui n'est pas un mode mais une source de mots. */
-  modes?: ModeCard[]
   themes?: ThemeCard[]
+  difficulties?: DifficultyCard[]
   status?: EntitlementsStatus
-  credits?: Credits | null
   /** Un tirage est en cours côté serveur. */
   drawing?: boolean
   wordsError?: string | null
-  wordsErrorKind?: WordsErrorKind | null
 }>(), {
   error: null,
-  modes: () => [],
   themes: () => [],
+  difficulties: () => [],
   status: 'ready',
-  credits: null,
   drawing: false,
-  wordsError: null,
-  wordsErrorKind: null
+  wordsError: null
 })
 
 const emit = defineEmits<{
   start: [SetupSubmission]
   retry: []
-  boutique: []
 }>()
 
 /**
- * Deux temps. Le menu ne montre que les modes et le dossier thématique — c'est
- * la seule décision à prendre avant de sortir le téléphone du sac. La table
- * vient ensuite : elle réunit tout ce qui dépend des joueurs présents.
+ * Deux temps. Le menu ne montre que le dossier thématique, le registre hot et
+ * la difficulté — c'est la seule décision à prendre avant de sortir le
+ * téléphone du sac. La table vient ensuite : elle réunit tout ce qui dépend
+ * des joueurs présents.
  */
 const step = ref<'menu' | 'table'>('menu')
 
@@ -66,9 +53,9 @@ const names = ref<string[]>(['', '', '', ''])
 /** Siège en cours d'édition : la table entière n'a qu'un champ de saisie. */
 const activeSeat = ref(0)
 const undercoverCount = ref(1)
-const mode = ref<ModeId>('classique')
 const theme = ref<ThemeId>('general')
-const timerSeconds = ref(DEFAULT_TIMER_SECONDS)
+const spicy = ref(false)
+const difficulty = ref<DifficultyId>('normal')
 const themesOpen = ref(false)
 
 const seatInput = useTemplateRef<HTMLInputElement>('seatInput')
@@ -76,17 +63,8 @@ const seatInput = useTemplateRef<HTMLInputElement>('seatInput')
 const undercoverCeiling = computed(() => maxUndercovers(names.value.length))
 const civilCount = computed(() => names.value.length - undercoverCount.value)
 
-const currentMode = computed(() => props.modes.find(item => item.id === mode.value) ?? null)
-const isTimed = computed(() => mode.value === 'chrono')
-const isSpicy = computed(() => currentMode.value?.spicy === true)
-
-/**
- * Le mode hot impose son propre registre de mots : lui proposer un dossier
- * thématique laisserait croire à un réglage qui n'a aucune prise.
- */
-const themePicker = computed(() => !isSpicy.value)
 const currentTheme = computed(() => props.themes.find(item => item.id === theme.value) ?? null)
-const submittedTheme = computed<ThemeId>(() => (isSpicy.value ? 'general' : theme.value))
+const currentDifficulty = computed(() => props.difficulties.find(item => item.id === difficulty.value) ?? null)
 
 const seats = computed<TableSeat[]>(() =>
   names.value.map((name, index) => ({
@@ -107,13 +85,7 @@ watch(() => names.value.length, (count) => {
   if (activeSeat.value >= count) activeSeat.value = count - 1
 })
 
-const outOfCredits = computed(
-  () => props.status === 'ready' && (props.credits?.remaining ?? 0) === 0
-)
-
-const canLaunch = computed(
-  () => props.status === 'ready' && !props.drawing && (props.credits?.remaining ?? 0) > 0
-)
+const canLaunch = computed(() => props.status === 'ready' && !props.drawing)
 
 function setPlayerCount(count: number) {
   if (count < MIN_PLAYERS || count > MAX_PLAYERS) return
@@ -131,11 +103,6 @@ function setPlayerCount(count: number) {
 function setUndercoverCount(count: number) {
   if (count < 1 || count > undercoverCeiling.value) return
   undercoverCount.value = count
-}
-
-function setTimer(seconds: number) {
-  if (seconds < MIN_TIMER_SECONDS || seconds > MAX_TIMER_SECONDS) return
-  timerSeconds.value = seconds
 }
 
 /**
@@ -160,21 +127,15 @@ function nextSeat() {
   focusSeatInput()
 }
 
-/** Un dossier scellé referme la vitrine et bascule sur la boutique. */
-function onThemeLocked() {
-  themesOpen.value = false
-  emit('boutique')
-}
-
 function start() {
   emit('start', {
     config: {
       names: names.value,
-      undercoverCount: undercoverCount.value,
-      mode: mode.value,
-      timerSeconds: timerSeconds.value
+      undercoverCount: undercoverCount.value
     },
-    theme: submittedTheme.value
+    theme: theme.value,
+    spicy: spicy.value,
+    difficulty: difficulty.value
   })
 }
 
@@ -192,23 +153,28 @@ const inputClass
       </p>
     </div>
 
-    <ModeSelector v-model="mode" :modes="modes" @locked="emit('boutique')" />
-
-    <Toast v-if="isSpicy" tone="danger">
-      Mode hot : mots réservés à un public adulte.
-    </Toast>
-
     <ThemeButton
-      v-if="themePicker"
       :theme="currentTheme"
       :disabled="themes.length === 0"
       @open="themesOpen = true"
     />
 
-    <p v-if="status === 'ready' && credits" class="text-center font-mono text-caption text-tertiary">
-      <template v-if="credits.unlimited">Missions illimitées</template>
-      <template v-else>Missions restantes aujourd'hui : {{ credits.remaining }}</template>
-    </p>
+    <Card class="flex items-center justify-between gap-4">
+      <div>
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Contenu hot</div>
+        <div class="mt-0.5 font-mono text-caption text-tertiary">Mots nettement plus osés. Réservé aux adultes.</div>
+      </div>
+      <SpicyToggle v-model="spicy" />
+    </Card>
+
+    <Card class="flex flex-col gap-3">
+      <div class="font-display text-body-s uppercase tracking-caps text-secondary">Difficulté</div>
+      <DifficultySlider v-model="difficulty" :difficulties="difficulties" />
+    </Card>
+
+    <Toast v-if="spicy" tone="danger">
+      Contenu hot : mots réservés à un public adulte.
+    </Toast>
 
     <Button size="l" class="w-full" @click="step = 'table'">
       Dresser la table
@@ -219,22 +185,20 @@ const inputClass
       :open="themesOpen"
       :themes="themes"
       @close="themesOpen = false"
-      @locked="onThemeLocked"
     />
   </div>
 
   <div v-else class="flex flex-col gap-5">
     <div class="flex items-center gap-3">
-      <IconButton :size="36" aria-label="Revenir au choix du mode" @click="step = 'menu'">
+      <IconButton :size="36" aria-label="Revenir au dossier thématique" @click="step = 'menu'">
         <ChevronLeft :size="16" />
       </IconButton>
       <div class="min-w-0">
         <div class="truncate font-display text-body-s uppercase tracking-caps text-primary">
-          {{ currentMode?.label ?? 'Classique' }}
+          {{ currentTheme?.label ?? 'Tous horizons' }}
         </div>
         <div class="truncate font-mono text-caption text-tertiary">
-          <template v-if="themePicker">{{ currentTheme?.label ?? 'Tous horizons' }}</template>
-          <template v-else>Registre osé</template>
+          {{ currentDifficulty?.label ?? 'Normal' }}<template v-if="spicy"> · Hot</template>
         </div>
       </div>
     </div>
@@ -311,23 +275,7 @@ const inputClass
       </div>
     </Card>
 
-    <Card v-if="isTimed" class="flex items-center justify-between gap-4">
-      <div>
-        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Temps de parole</div>
-        <div class="mt-0.5 font-mono text-caption text-tertiary">par agent et par manche</div>
-      </div>
-      <div class="flex items-center gap-3">
-        <IconButton :size="34" aria-label="Réduire le temps de parole" @click="setTimer(timerSeconds - 5)">
-          <Minus :size="15" />
-        </IconButton>
-        <span class="w-12 text-center font-display text-display-s text-primary">{{ timerSeconds }}s</span>
-        <IconButton :size="34" aria-label="Augmenter le temps de parole" @click="setTimer(timerSeconds + 5)">
-          <Plus :size="15" />
-        </IconButton>
-      </div>
-    </Card>
-
-    <Card class="flex flex-col gap-3">
+    <Card v-if="status === 'loading' || status === 'idle' || status === 'error'" class="flex flex-col gap-3">
       <div>
         <div class="font-display text-body-s uppercase tracking-caps text-secondary">Mots de la mission</div>
         <div class="mt-0.5 font-mono text-caption text-tertiary">
@@ -336,10 +284,10 @@ const inputClass
       </div>
 
       <p v-if="status === 'loading' || status === 'idle'" class="font-mono text-caption text-tertiary">
-        Contact du QG… vérification de ton dossier.
+        Contact du QG… vérification du dossier.
       </p>
 
-      <template v-else-if="status === 'error'">
+      <template v-else>
         <p class="text-body-s text-secondary">
           Impossible de joindre le QG. Vérifie ta connexion, puis réessaie.
         </p>
@@ -347,41 +295,10 @@ const inputClass
           Réessayer
         </Button>
       </template>
-
-      <template v-else-if="credits">
-        <p v-if="outOfCredits" class="text-body-s text-secondary">
-          Tu as épuisé tes missions du jour. Elles reviennent à minuit — ou tout de suite avec un pack.
-        </p>
-        <p v-else-if="credits.unlimited" class="font-mono text-caption text-tertiary">
-          Missions illimitées
-        </p>
-        <p v-else class="font-mono text-caption text-tertiary">
-          Missions restantes aujourd'hui : {{ credits.remaining }}
-          <template v-if="credits.wallet > 0">
-            ({{ credits.dailyRemaining }} du jour + {{ credits.wallet }} en réserve)
-          </template>
-          <template v-else>/ {{ credits.dailyLimit }}</template>
-        </p>
-        <Button v-if="outOfCredits" size="s" variant="ghost" class="self-start" @click="emit('boutique')">
-          Voir les packs
-        </Button>
-      </template>
     </Card>
 
     <Toast v-if="error" tone="danger">{{ error }}</Toast>
-
-    <template v-if="wordsError">
-      <Toast tone="danger">{{ wordsError }}</Toast>
-      <Button
-        v-if="wordsErrorKind === 'locked' || wordsErrorKind === 'credits'"
-        size="s"
-        variant="ghost"
-        class="self-start"
-        @click="emit('boutique')"
-      >
-        Voir les packs
-      </Button>
-    </template>
+    <Toast v-if="wordsError" tone="danger">{{ wordsError }}</Toast>
 
     <Button size="l" class="w-full" :disabled="!canLaunch" @click="start()">
       {{ drawing ? 'Contact du QG…' : 'Lancer la mission' }}
