@@ -6,22 +6,18 @@ import type {
   DifficultyCard,
   DifficultyId,
   EntitlementsStatus,
-  ThemeCard,
-  ThemeId
 } from '../../composables/useEntitlements'
 import type { TableSeat } from './GameTable.vue'
 import logoFull from '../../assets/images/logo-full.png'
 
 export interface SetupSubmission {
   config: GameConfig
-  theme: ThemeId
   spicy: boolean
   difficulty: DifficultyId
 }
 
 const props = withDefaults(defineProps<{
   error?: string | null
-  themes?: ThemeCard[]
   difficulties?: DifficultyCard[]
   status?: EntitlementsStatus
   /** Un tirage est en cours côté serveur. */
@@ -29,7 +25,6 @@ const props = withDefaults(defineProps<{
   wordsError?: string | null
 }>(), {
   error: null,
-  themes: () => [],
   difficulties: () => [],
   status: 'ready',
   drawing: false,
@@ -41,29 +36,20 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-/**
- * Deux temps. Le menu ne montre que le dossier thématique, le registre hot et
- * la difficulté — c'est la seule décision à prendre avant de sortir le
- * téléphone du sac. La table vient ensuite : elle réunit tout ce qui dépend
- * des joueurs présents.
- */
 const step = ref<'menu' | 'table'>('menu')
 
 const names = ref<string[]>(['', '', '', ''])
 /** Siège en cours d'édition : la table entière n'a qu'un champ de saisie. */
 const activeSeat = ref(0)
 const undercoverCount = ref(1)
-const theme = ref<ThemeId>('general')
 const spicy = ref(false)
 const difficulty = ref<DifficultyId>('normal')
-const themesOpen = ref(false)
 
 const seatInput = useTemplateRef<HTMLInputElement>('seatInput')
 
 const undercoverCeiling = computed(() => maxUndercovers(names.value.length))
 const civilCount = computed(() => names.value.length - undercoverCount.value)
 
-const currentTheme = computed(() => props.themes.find(item => item.id === theme.value) ?? null)
 const currentDifficulty = computed(() => props.difficulties.find(item => item.id === difficulty.value) ?? null)
 
 const seats = computed<TableSeat[]>(() =>
@@ -133,7 +119,6 @@ function start() {
       names: names.value,
       undercoverCount: undercoverCount.value
     },
-    theme: theme.value,
     spicy: spicy.value,
     difficulty: difficulty.value
   })
@@ -152,12 +137,6 @@ const inputClass
         Un agent double se cache parmi vous.
       </p>
     </div>
-
-    <ThemeButton
-      :theme="currentTheme"
-      :disabled="themes.length === 0"
-      @open="themesOpen = true"
-    />
 
     <Card class="flex items-center justify-between gap-4">
       <div>
@@ -179,25 +158,15 @@ const inputClass
     <Button size="l" class="w-full" @click="step = 'table'">
       Dresser la table
     </Button>
-
-    <ThemeCarousel
-      v-model="theme"
-      :open="themesOpen"
-      :themes="themes"
-      @close="themesOpen = false"
-    />
   </div>
 
   <div v-else class="flex flex-col gap-5">
     <div class="flex items-center gap-3">
-      <IconButton :size="36" aria-label="Revenir au dossier thématique" @click="step = 'menu'">
+      <IconButton :size="36" aria-label="Revenir au menu" @click="step = 'menu'">
         <ChevronLeft :size="16" />
       </IconButton>
       <div class="min-w-0">
         <div class="truncate font-display text-body-s uppercase tracking-caps text-primary">
-          {{ currentTheme?.label ?? 'Tous horizons' }}
-        </div>
-        <div class="truncate font-mono text-caption text-tertiary">
           {{ currentDifficulty?.label ?? 'Normal' }}<template v-if="spicy"> · Hot</template>
         </div>
       </div>

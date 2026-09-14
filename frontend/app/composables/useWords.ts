@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { DifficultyId, ThemeId } from './useEntitlements'
+import type { DifficultyId } from './useEntitlements'
 import type { WordPair } from './useGame'
 
 export type WordsStatus = 'idle' | 'drawing' | 'ready' | 'error'
@@ -48,7 +48,7 @@ export function createWords(options: {
    * Demande les mots d'une partie. Rend `null` en cas d'échec : l'appelant ne
    * doit surtout pas démarrer la partie.
    */
-  async function draw(theme: ThemeId, spicy: boolean, difficulty: DifficultyId): Promise<DrawResponse | null> {
+  async function draw(spicy: boolean, difficulty: DifficultyId): Promise<DrawResponse | null> {
     status.value = 'drawing'
     error.value = null
     errorKind.value = null
@@ -57,7 +57,7 @@ export function createWords(options: {
     try {
       response = await options.request('/words/draw', {
         method: 'POST',
-        body: JSON.stringify({ theme, spicy, difficulty })
+        body: JSON.stringify({ theme: 'general', spicy, difficulty })
       })
     }
     catch {

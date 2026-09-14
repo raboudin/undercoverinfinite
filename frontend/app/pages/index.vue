@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { createGame } from '~/composables/useGame'
-import type { DifficultyId, ThemeId } from '~/composables/useEntitlements'
+import type { DifficultyId } from '~/composables/useEntitlements'
 import { useBackgroundMusic } from '~/composables/useBackgroundMusic'
 import { useMissionExit } from '~/composables/useMissionExit'
 import type { SetupSubmission } from '~/components/game/SetupScreen.vue'
@@ -33,7 +33,7 @@ const nuxtApp = useNuxtApp()
 const entitlements = nuxtApp.$entitlements
 const words = nuxtApp.$words
 
-const { status: rightsStatus, themeCards, difficultyCards, refresh: refreshRights } = entitlements
+const { status: rightsStatus, difficultyCards, refresh: refreshRights } = entitlements
 const { status: wordsStatus, error: wordsError } = words
 
 // Client uniquement : le catalogue n'a pas besoin du rendu serveur, mais
@@ -54,26 +54,26 @@ const drawing = computed(() => wordsStatus.value === 'drawing')
 const canReplay = computed(() => lastTeam.value !== null)
 
 /** Réglages qui ont servi à lancer la partie, pour pouvoir la rejouer. */
-const lastTeam = ref<{ theme: ThemeId, spicy: boolean, difficulty: DifficultyId } | null>(null)
+const lastTeam = ref<{ spicy: boolean, difficulty: DifficultyId } | null>(null)
 
 async function start(submission: SetupSubmission) {
-  const draw = await words.draw(submission.theme, submission.spicy, submission.difficulty)
+  const draw = await words.draw(submission.spicy, submission.difficulty)
   if (!draw) return
 
   if (configure(submission.config, { pair: draw.pair })) {
-    lastTeam.value = { theme: submission.theme, spicy: submission.spicy, difficulty: submission.difficulty }
+    lastTeam.value = { spicy: submission.spicy, difficulty: submission.difficulty }
     // Le clic est le geste utilisateur qui débloque l'autoplay du navigateur.
     void music.start()
   }
 }
 
 // Rejouer est une nouvelle partie : nouveaux mots, donc un nouveau tirage.
-// Le dossier thématique, le registre et la difficulté, eux, ne bougent pas.
+// Le registre et la difficulté, eux, ne bougent pas.
 async function replay() {
   const team = lastTeam.value
   if (!team) return
 
-  const draw = await words.draw(team.theme, team.spicy, team.difficulty)
+  const draw = await words.draw(team.spicy, team.difficulty)
   if (!draw) return
 
   replaySameTeam({ pair: draw.pair })
@@ -84,7 +84,6 @@ async function replay() {
   <SetupScreen
     v-if="phase === 'setup'"
     :error="error"
-    :themes="themeCards"
     :difficulties="difficultyCards"
     :status="rightsStatus"
     :drawing="drawing"
