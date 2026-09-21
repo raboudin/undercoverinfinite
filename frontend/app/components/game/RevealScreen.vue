@@ -74,25 +74,17 @@ function pass() {
     >
       <div class="font-display text-body uppercase tracking-caps text-primary">{{ player.name }}</div>
       <div class="mt-1 font-mono text-caption leading-snug text-tertiary">
-        {{ revealed ? 'dossier ouvert' : 'prends le téléphone' }}
+        {{ revealed ? ‘dossier ouvert’ : ‘prends le téléphone’ }}
       </div>
+
+      <template #reveal-action>
+        <Button size="l" variant="secondary" style="width: min(58vw, 260px)" @click="pass()">
+          {{ isLast ? ‘Tout le monde est briefé’ : ‘C\’est mémorisé — passe le téléphone’ }}
+        </Button>
+      </template>
     </GameTable>
 
-    <template v-if="revealed">
-      <Card glow="danger" class="flex flex-col items-center gap-1.5 py-6 text-center">
-        <span class="font-mono text-caption uppercase tracking-caps text-tertiary">Ton mot de couverture</span>
-        <span class="font-display text-display-m uppercase tracking-caps text-red-4">{{ player.word }}</span>
-        <p class="mt-1 max-w-xs text-body-s text-secondary">
-          Mémorise-le. Ne le prononce jamais à voix haute — il te trahirait.
-        </p>
-      </Card>
-
-      <Button size="l" variant="secondary" class="w-full" @click="pass()">
-        {{ isLast ? 'Tout le monde est briefé' : 'C’est mémorisé — passe le téléphone' }}
-      </Button>
-    </template>
-
-    <template v-else>
+    <template v-if="!revealed">
       <p class="text-center text-body-s text-secondary">
         À toi, {{ player.name }}. Retourne ta carte sans que personne ne regarde par-dessus ton épaule.
       </p>

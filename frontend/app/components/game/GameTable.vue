@@ -201,38 +201,42 @@ function pick(seat: TableSeat) {
       <Transition name="reveal-center">
         <div
           v-if="revealingSeat"
-          class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-ink-0/75"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-ink-0/75"
         >
-          <div class="flip-scene reveal-center-card" style="width: min(58vw, 260px)">
-            <div class="reveal-center-flip flip-card block w-full rounded-sm border border-default aspect-[4/5]">
-              <!-- Dos -->
-              <span class="flip-face card-back flex flex-col items-center justify-between rounded-sm px-3 py-4">
-                <span class="pointer-events-none absolute inset-[4px] rounded-[3px] border border-steel-1/25" />
-                <span class="relative font-mono text-body-s leading-none text-tertiary">
-                  {{ String(revealingIndex + 1).padStart(2, '0') }}
+          <div class="flex flex-col items-center gap-6" style="width: min(58vw, 260px)">
+            <div class="flip-scene reveal-center-card w-full">
+              <div class="reveal-center-flip flip-card block w-full rounded-sm border border-default aspect-[4/5]">
+                <!-- Dos -->
+                <span class="flip-face card-back flex flex-col items-center justify-between rounded-sm px-3 py-4">
+                  <span class="pointer-events-none absolute inset-[4px] rounded-[3px] border border-steel-1/25" />
+                  <span class="relative font-mono text-body-s leading-none text-tertiary">
+                    {{ String(revealingIndex + 1).padStart(2, '0') }}
+                  </span>
+                  <span
+                    class="relative flex w-[42%] items-center justify-center rounded-full border border-steel-1/35 font-display text-display-m leading-none text-steel-1"
+                    style="aspect-ratio: 1"
+                  >∞</span>
+                  <span class="relative w-full truncate text-center font-display text-body-s uppercase tracking-caps text-secondary">
+                    {{ revealingSeat.name || '—' }}
+                  </span>
                 </span>
-                <span
-                  class="relative flex w-[42%] items-center justify-center rounded-full border border-steel-1/35 font-display text-display-m leading-none text-steel-1"
-                  style="aspect-ratio: 1"
-                >∞</span>
-                <span class="relative w-full truncate text-center font-display text-body-s uppercase tracking-caps text-secondary">
-                  {{ revealingSeat.name || '—' }}
+                <!-- Face (mot) -->
+                <span class="flip-face flip-face--back card-face flex flex-col items-center justify-between rounded-sm px-3 py-4">
+                  <span class="pointer-events-none absolute inset-[4px] rounded-[3px] border border-red-9/45" />
+                  <span class="relative font-mono text-body-s leading-none text-tertiary">
+                    {{ String(revealingIndex + 1).padStart(2, '0') }}
+                  </span>
+                  <span class="relative line-clamp-3 px-1 text-center font-display text-title uppercase leading-tight tracking-caps text-primary">
+                    {{ revealingSeat.word }}
+                  </span>
+                  <span class="relative w-full truncate text-center font-display text-body-s uppercase tracking-caps text-tertiary">
+                    {{ revealingSeat.name || '—' }}
+                  </span>
                 </span>
-              </span>
-              <!-- Face (mot) -->
-              <span class="flip-face flip-face--back card-face flex flex-col items-center justify-between rounded-sm px-3 py-4">
-                <span class="pointer-events-none absolute inset-[4px] rounded-[3px] border border-red-9/45" />
-                <span class="relative font-mono text-body-s leading-none text-tertiary">
-                  {{ String(revealingIndex + 1).padStart(2, '0') }}
-                </span>
-                <span class="relative line-clamp-3 px-1 text-center font-display text-title uppercase leading-tight tracking-caps text-primary">
-                  {{ revealingSeat.word }}
-                </span>
-                <span class="relative w-full truncate text-center font-display text-body-s uppercase tracking-caps text-tertiary">
-                  {{ revealingSeat.name || '—' }}
-                </span>
-              </span>
+              </div>
             </div>
+            <!-- Action fournie par le parent (ex. "C'est mémorisé") -->
+            <slot name="reveal-action" />
           </div>
         </div>
       </Transition>
