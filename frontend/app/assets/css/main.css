@@ -134,21 +134,14 @@ body {
   transform: rotateY(180deg);
 }
 
-/* Dos de carte : guilloché croisé sous un halo froid. */
+/* Dos de carte. */
 .card-back {
   background-color: var(--color-ink-4);
-  background-image:
-    repeating-linear-gradient(45deg, rgba(90, 110, 145, .12) 0 1px, transparent 1px 7px),
-    repeating-linear-gradient(-45deg, rgba(90, 110, 145, .09) 0 1px, transparent 1px 7px),
-    radial-gradient(circle at 50% 44%, rgba(74, 111, 165, .22), transparent 62%);
 }
 
-/* Face révélée : le dossier ouvert sous la lampe. */
+/* Face révélée. */
 .card-face {
   background-color: var(--color-ink-4);
-  background-image:
-    radial-gradient(circle at 50% 32%, rgba(214, 40, 57, .22), transparent 66%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, .032) 0 1px, transparent 1px 4px);
 }
 
 /* Le moment où une carte se retourne. L'animation porte sur `scale`, propriété

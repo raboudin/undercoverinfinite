@@ -119,8 +119,8 @@ function pick(seat: TableSeat) {
       :key="seat.id"
       class="flip-scene absolute -translate-x-1/2 -translate-y-1/2"
       :class="[
-        stateOf(seat) === 'eliminated' ? 'opacity-60' : '',
-        seat.revealing ? 'seat-reveal' : ''
+        stateOf(seat) === 'eliminated' && !seat.revealing ? 'opacity-60' : '',
+        seat.revealing ? 'opacity-0' : ''
       ]"
       :style="style"
     >
@@ -196,45 +196,46 @@ function pick(seat: TableSeat) {
       </component>
     </div>
 
-    <!-- Carte agrandie au centre pendant le retournement. -->
-    <Transition name="reveal-center">
-      <div
-        v-if="revealingSeat"
-        class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"
-      >
-        <div class="absolute inset-[10%] rounded-[50%] bg-ink-0/65" />
-        <div class="flip-scene reveal-center-card relative" style="width: 46%">
-          <div class="reveal-center-flip flip-card block w-full rounded-sm border border-default aspect-[4/5]">
-            <!-- Dos -->
-            <span class="flip-face card-back flex flex-col items-center justify-between rounded-sm px-2 py-3">
-              <span class="pointer-events-none absolute inset-[3px] rounded-[3px] border border-steel-1/25" />
-              <span class="relative font-mono text-caption leading-none text-tertiary">
-                {{ String(revealingIndex + 1).padStart(2, '0') }}
+    <!-- Carte agrandie au centre de l'écran pendant le retournement. -->
+    <Teleport to="body">
+      <Transition name="reveal-center">
+        <div
+          v-if="revealingSeat"
+          class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-ink-0/75"
+        >
+          <div class="flip-scene reveal-center-card" style="width: min(58vw, 260px)">
+            <div class="reveal-center-flip flip-card block w-full rounded-sm border border-default aspect-[4/5]">
+              <!-- Dos -->
+              <span class="flip-face card-back flex flex-col items-center justify-between rounded-sm px-3 py-4">
+                <span class="pointer-events-none absolute inset-[4px] rounded-[3px] border border-steel-1/25" />
+                <span class="relative font-mono text-body-s leading-none text-tertiary">
+                  {{ String(revealingIndex + 1).padStart(2, '0') }}
+                </span>
+                <span
+                  class="relative flex w-[42%] items-center justify-center rounded-full border border-steel-1/35 font-display text-display-m leading-none text-steel-1"
+                  style="aspect-ratio: 1"
+                >∞</span>
+                <span class="relative w-full truncate text-center font-display text-body-s uppercase tracking-caps text-secondary">
+                  {{ revealingSeat.name || '—' }}
+                </span>
               </span>
-              <span
-                class="relative flex w-[42%] items-center justify-center rounded-full border border-steel-1/35 font-display text-display-s leading-none text-steel-1"
-                style="aspect-ratio: 1"
-              >∞</span>
-              <span class="relative w-full truncate text-center font-display text-caption uppercase tracking-caps text-secondary">
-                {{ revealingSeat.name || '—' }}
+              <!-- Face (mot) -->
+              <span class="flip-face flip-face--back card-face flex flex-col items-center justify-between rounded-sm px-3 py-4">
+                <span class="pointer-events-none absolute inset-[4px] rounded-[3px] border border-red-9/45" />
+                <span class="relative font-mono text-body-s leading-none text-tertiary">
+                  {{ String(revealingIndex + 1).padStart(2, '0') }}
+                </span>
+                <span class="relative line-clamp-3 px-1 text-center font-display text-title uppercase leading-tight tracking-caps text-primary">
+                  {{ revealingSeat.word }}
+                </span>
+                <span class="relative w-full truncate text-center font-display text-body-s uppercase tracking-caps text-tertiary">
+                  {{ revealingSeat.name || '—' }}
+                </span>
               </span>
-            </span>
-            <!-- Face (mot) -->
-            <span class="flip-face flip-face--back card-face flex flex-col items-center justify-between rounded-sm px-2 py-3">
-              <span class="pointer-events-none absolute inset-[3px] rounded-[3px] border border-red-9/45" />
-              <span class="relative font-mono text-caption leading-none text-tertiary">
-                {{ String(revealingIndex + 1).padStart(2, '0') }}
-              </span>
-              <span class="relative line-clamp-3 px-1 text-center font-display text-body uppercase leading-tight tracking-caps text-primary">
-                {{ revealingSeat.word }}
-              </span>
-              <span class="relative w-full truncate text-center font-display text-caption uppercase tracking-caps text-tertiary">
-                {{ revealingSeat.name || '—' }}
-              </span>
-            </span>
+            </div>
           </div>
         </div>
-      </div>
-    </Transition>
+      </Transition>
+    </Teleport>
   </div>
 </template>
