@@ -39,6 +39,9 @@ const emit = defineEmits<{ select: [string] }>()
 /** Géométrie du plateau : voir `utils/tableLayout`, qui en porte les règles. */
 const layout = computed(() => seatLayout(props.seats.length))
 
+const revealingSeat = computed(() => props.seats.find(s => s.revealing) ?? null)
+const revealingIndex = computed(() => props.seats.findIndex(s => s.revealing))
+
 const placed = computed(() =>
   props.seats.map((seat, index) => {
     const position = layout.value.positions[index]!
@@ -78,8 +81,8 @@ const markClass = computed(() =>
 )
 
 const frameClasses: Record<SeatState, string> = {
-  empty: 'border-dashed border-subtle',
-  idle: 'border-subtle',
+  empty: 'border-dashed border-default',
+  idle: 'border-default',
   active: 'border-blue-4 shadow-glow-recon',
   eliminated: 'border-red-9'
 }
@@ -192,5 +195,46 @@ function pick(seat: TableSeat) {
         </span>
       </component>
     </div>
+
+    <!-- Carte agrandie au centre pendant le retournement. -->
+    <Transition name="reveal-center">
+      <div
+        v-if="revealingSeat"
+        class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"
+      >
+        <div class="absolute inset-[10%] rounded-[50%] bg-ink-0/65" />
+        <div class="flip-scene reveal-center-card relative" style="width: 46%">
+          <div class="reveal-center-flip flip-card block w-full rounded-sm border border-default aspect-[4/5]">
+            <!-- Dos -->
+            <span class="flip-face card-back flex flex-col items-center justify-between rounded-sm px-2 py-3">
+              <span class="pointer-events-none absolute inset-[3px] rounded-[3px] border border-steel-1/25" />
+              <span class="relative font-mono text-caption leading-none text-tertiary">
+                {{ String(revealingIndex + 1).padStart(2, '0') }}
+              </span>
+              <span
+                class="relative flex w-[42%] items-center justify-center rounded-full border border-steel-1/35 font-display text-display-s leading-none text-steel-1"
+                style="aspect-ratio: 1"
+              >∞</span>
+              <span class="relative w-full truncate text-center font-display text-caption uppercase tracking-caps text-secondary">
+                {{ revealingSeat.name || '—' }}
+              </span>
+            </span>
+            <!-- Face (mot) -->
+            <span class="flip-face flip-face--back card-face flex flex-col items-center justify-between rounded-sm px-2 py-3">
+              <span class="pointer-events-none absolute inset-[3px] rounded-[3px] border border-red-9/45" />
+              <span class="relative font-mono text-caption leading-none text-tertiary">
+                {{ String(revealingIndex + 1).padStart(2, '0') }}
+              </span>
+              <span class="relative line-clamp-3 px-1 text-center font-display text-body uppercase leading-tight tracking-caps text-primary">
+                {{ revealingSeat.word }}
+              </span>
+              <span class="relative w-full truncate text-center font-display text-caption uppercase tracking-caps text-tertiary">
+                {{ revealingSeat.name || '—' }}
+              </span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>

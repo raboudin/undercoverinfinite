@@ -115,6 +115,7 @@ body {
   position: relative;
   transform-style: preserve-3d;
   transition: transform .5s cubic-bezier(.2, .7, .3, 1);
+  box-shadow: 0 2px 4px rgba(0,0,0,.55), 0 6px 18px rgba(0,0,0,.4);
 }
 
 .flip-card--up {
@@ -135,19 +136,19 @@ body {
 
 /* Dos de carte : guilloché croisé sous un halo froid. */
 .card-back {
-  background-color: var(--color-ink-2);
+  background-color: var(--color-ink-4);
   background-image:
-    repeating-linear-gradient(45deg, rgba(90, 110, 145, .10) 0 1px, transparent 1px 7px),
-    repeating-linear-gradient(-45deg, rgba(90, 110, 145, .07) 0 1px, transparent 1px 7px),
-    radial-gradient(circle at 50% 44%, rgba(74, 111, 165, .18), transparent 62%);
+    repeating-linear-gradient(45deg, rgba(90, 110, 145, .12) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-45deg, rgba(90, 110, 145, .09) 0 1px, transparent 1px 7px),
+    radial-gradient(circle at 50% 44%, rgba(74, 111, 165, .22), transparent 62%);
 }
 
 /* Face révélée : le dossier ouvert sous la lampe. */
 .card-face {
-  background-color: var(--color-ink-3);
+  background-color: var(--color-ink-4);
   background-image:
-    radial-gradient(circle at 50% 32%, rgba(214, 40, 57, .16), transparent 66%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, .028) 0 1px, transparent 1px 4px);
+    radial-gradient(circle at 50% 32%, rgba(214, 40, 57, .22), transparent 66%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .032) 0 1px, transparent 1px 4px);
 }
 
 /* Le moment où une carte se retourne. L'animation porte sur `scale`, propriété
@@ -163,7 +164,7 @@ body {
 
 @keyframes seat-reveal {
   0% { scale: 1; }
-  42% { scale: 1.13; }
+  42% { scale: 1.05; }
   100% { scale: 1; }
 }
 
@@ -173,13 +174,41 @@ body {
   100% { box-shadow: 0 0 0 0 rgba(127, 160, 201, 0); }
 }
 
+/* Grande carte au centre lors du retournement. */
+.reveal-center-enter-active { transition: opacity .25s ease; }
+.reveal-center-leave-active { transition: opacity .5s ease; }
+.reveal-center-enter-from,
+.reveal-center-leave-to { opacity: 0; }
+
+.reveal-center-card {
+  animation: reveal-center-appear .45s cubic-bezier(.2, .7, .3, 1);
+}
+
+@keyframes reveal-center-appear {
+  from { scale: .75; }
+  to   { scale: 1; }
+}
+
+/* La carte centrale se retourne d'elle-même au montage (animation au lieu de
+   la transition, pour partir du dos sans dépendre de flip-card--up). */
+.reveal-center-flip {
+  animation: reveal-center-flip .65s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+
+@keyframes reveal-center-flip {
+  from { transform: rotateY(0deg); }
+  to   { transform: rotateY(180deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .flip-card {
     transition: none;
   }
 
   .seat-reveal,
-  .seat-reveal .flip-card {
+  .seat-reveal .flip-card,
+  .reveal-center-card,
+  .reveal-center-flip {
     animation: none;
   }
 }
