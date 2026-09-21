@@ -23,12 +23,21 @@ const props = withDefaults(defineProps<{
   /** Un tirage est en cours côté serveur. */
   drawing?: boolean
   wordsError?: string | null
+  /** Pré-remplissage pour un replay : démarre directement à l'étape table. */
+  initialNames?: string[]
+  initialUndercoverCount?: number
+  initialSpicy?: boolean
+  initialDifficulty?: DifficultyId
 }>(), {
   error: null,
   difficulties: () => [],
   status: 'ready',
   drawing: false,
-  wordsError: null
+  wordsError: null,
+  initialNames: undefined,
+  initialUndercoverCount: undefined,
+  initialSpicy: undefined,
+  initialDifficulty: undefined,
 })
 
 const emit = defineEmits<{
@@ -36,21 +45,20 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-const step = ref<'menu' | 'table'>('menu')
+const step = ref<'menu' | 'table'>(props.initialNames?.length ? 'table' : 'menu')
 
-const names = ref<string[]>(['', '', '', ''])
+const names = ref<string[]>(props.initialNames?.length ? [...props.initialNames] : ['', '', '', ''])
 /** Siège en cours d'édition : la table entière n'a qu'un champ de saisie. */
 const activeSeat = ref(0)
-const undercoverCount = ref(1)
-const spicy = ref(false)
-const difficulty = ref<DifficultyId>('normal')
+const undercoverCount = ref(props.initialUndercoverCount ?? 1)
+const spicy = ref(props.initialSpicy ?? false)
+const difficulty = ref<DifficultyId>(props.initialDifficulty ?? 'normal')
 
 const seatInput = useTemplateRef<HTMLInputElement>('seatInput')
 
 const undercoverCeiling = computed(() => maxUndercovers(names.value.length))
 const civilCount = computed(() => names.value.length - undercoverCount.value)
 
-const currentDifficulty = computed(() => props.difficulties.find(item => item.id === difficulty.value) ?? null)
 
 const seats = computed<TableSeat[]>(() =>
   names.value.map((name, index) => ({
@@ -138,26 +146,16 @@ const inputClass
       </p>
     </div>
 
-    <Card class="flex items-center justify-between gap-4">
-      <div>
-        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Contenu hot</div>
-        <div class="mt-0.5 font-mono text-caption text-tertiary">Mots nettement plus osés. Réservé aux adultes.</div>
-      </div>
-      <SpicyToggle v-model="spicy" />
-    </Card>
-
-    <Card class="flex flex-col gap-3">
-      <div class="font-display text-body-s uppercase tracking-caps text-secondary">Difficulté</div>
-      <DifficultySlider v-model="difficulty" :difficulties="difficulties" />
-    </Card>
-
-    <Toast v-if="spicy" tone="danger">
-      Contenu hot : mots réservés à un public adulte.
-    </Toast>
-
-    <Button size="l" class="w-full" @click="step = 'table'">
-      Dresser la table
-    </Button>
+    <div class="flex flex-col gap-3">
+      <Button size="l" class="w-full" @click="step = 'table'">
+        Jouer en local
+      </Button>
+      <NuxtLink to="/salle" class="w-full">
+        <Button size="l" variant="secondary" class="w-full">
+          Jouer en ligne — partie privée
+        </Button>
+      </NuxtLink>
+    </div>
   </div>
 
   <div v-else class="flex flex-col gap-5">
@@ -165,11 +163,6 @@ const inputClass
       <IconButton :size="36" aria-label="Revenir au menu" @click="step = 'menu'">
         <ChevronLeft :size="16" />
       </IconButton>
-      <div class="min-w-0">
-        <div class="truncate font-display text-body-s uppercase tracking-caps text-primary">
-          {{ currentDifficulty?.label ?? 'Normal' }}<template v-if="spicy"> · Hot</template>
-        </div>
-      </div>
     </div>
 
     <GameTable
@@ -243,6 +236,23 @@ const inputClass
         </IconButton>
       </div>
     </Card>
+
+    <Card class="flex items-center justify-between gap-4">
+      <div>
+        <div class="font-display text-body-s uppercase tracking-caps text-secondary">Contenu hot</div>
+        <div class="mt-0.5 font-mono text-caption text-tertiary">Mots nettement plus osés. Réservé aux adultes.</div>
+      </div>
+      <SpicyToggle v-model="spicy" />
+    </Card>
+
+    <Card class="flex flex-col gap-3">
+      <div class="font-display text-body-s uppercase tracking-caps text-secondary">Difficulté</div>
+      <DifficultySlider v-model="difficulty" :difficulties="difficulties" />
+    </Card>
+
+    <Toast v-if="spicy" tone="danger">
+      Contenu hot : mots réservés à un public adulte.
+    </Toast>
 
     <Card v-if="status === 'loading' || status === 'idle' || status === 'error'" class="flex flex-col gap-3">
       <div>

@@ -25,7 +25,6 @@ const {
   nextSpeaker,
   eliminate,
   resolveElimination,
-  replaySameTeam,
   newGame
 } = createGame()
 
@@ -53,30 +52,38 @@ watch(missionExit, () => {
 const drawing = computed(() => wordsStatus.value === 'drawing')
 const canReplay = computed(() => lastTeam.value !== null)
 
-/** Réglages qui ont servi à lancer la partie, pour pouvoir la rejouer. */
-const lastTeam = ref<{ spicy: boolean, difficulty: DifficultyId } | null>(null)
+/** Réglages de la dernière partie, pour pré-remplir le replay. */
+const lastTeam = ref<{
+  names: string[]
+  undercoverCount: number
+  spicy: boolean
+  difficulty: DifficultyId
+} | null>(null)
+
+/** Données à injecter dans SetupScreen au prochain montage (replay). */
+const replaySetup = ref<typeof lastTeam.value>(null)
 
 async function start(submission: SetupSubmission) {
   const draw = await words.draw(submission.spicy, submission.difficulty)
   if (!draw) return
 
   if (configure(submission.config, { pair: draw.pair })) {
-    lastTeam.value = { spicy: submission.spicy, difficulty: submission.difficulty }
+    lastTeam.value = {
+      names: submission.config.names,
+      undercoverCount: submission.config.undercoverCount,
+      spicy: submission.spicy,
+      difficulty: submission.difficulty,
+    }
+    replaySetup.value = null
     // Le clic est le geste utilisateur qui débloque l'autoplay du navigateur.
     void music.start()
   }
 }
 
-// Rejouer est une nouvelle partie : nouveaux mots, donc un nouveau tirage.
-// Le registre et la difficulté, eux, ne bougent pas.
-async function replay() {
-  const team = lastTeam.value
-  if (!team) return
-
-  const draw = await words.draw(team.spicy, team.difficulty)
-  if (!draw) return
-
-  replaySameTeam({ pair: draw.pair })
+function replay() {
+  if (!lastTeam.value) return
+  replaySetup.value = lastTeam.value
+  newGame()
 }
 </script>
 
@@ -88,6 +95,10 @@ async function replay() {
     :status="rightsStatus"
     :drawing="drawing"
     :words-error="wordsError"
+    :initial-names="replaySetup?.names"
+    :initial-undercover-count="replaySetup?.undercoverCount"
+    :initial-spicy="replaySetup?.spicy"
+    :initial-difficulty="replaySetup?.difficulty"
     @start="start"
     @retry="refreshRights"
   />
